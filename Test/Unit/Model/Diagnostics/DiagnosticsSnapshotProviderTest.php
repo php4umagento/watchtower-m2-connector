@@ -1,0 +1,348 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Watchtower\Connector\Test\Unit\Model\Diagnostics;
+
+use Magento\Store\Model\StoreManagerInterface;
+use PHPUnit\Framework\TestCase;
+use Watchtower\Connector\Model\Api\PingResult;
+use Watchtower\Connector\Model\Api\PingService;
+use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
+use Watchtower\Connector\Model\Config;
+use Watchtower\Connector\Model\CronHealth\Evaluator as CronHealthEvaluator;
+use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
+use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
+use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
+use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
+use Watchtower\Connector\Model\HealthState\HealthState;
+use Watchtower\Connector\Model\HealthState\HealthStateRepository;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfig;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthState;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
+use Watchtower\Connector\Model\RateSignal\DispersionState;
+use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
+use Watchtower\Connector\Model\Seed\HistorySeeder;
+use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
+use Watchtower\Connector\Test\Unit\StoreStubTrait;
+
+/**
+ * Proves DiagnosticsSnapshotProvider assembles a full DiagnosticsSnapshot
+ * from its 9 read-only sources -- this is the shared layer both
+ * watchtower:status and the admin diagnostics page render, so its own
+ * assembly logic is tested independently of either presentation.
+ */
+class DiagnosticsSnapshotProviderTest extends TestCase
+{
+    use StoreStubTrait;
+
+    private const NOW_STRING = '2026-08-14T09:00:00+00:00';
+
+    public function testUnreachablePingStillProducesASnapshotWithNullConnectionFields(): void
+    {
+        $pingService = $this->createStub(PingService::class);
+        $pingService->method('ping')->willReturn(
+            new PingResult(reachable: false, errorMessage: 'Connection refused')
+        );
+
+        $snapshot = $this->provider(pingService: $pingService)->snapshot($this->now());
+
+        self::assertFalse($snapshot->reachable);
+        self::assertSame('Connection refused', $snapshot->unreachableError);
+        self::assertNull($snapshot->keyValid);
+        self::assertNull($snapshot->organizationPaused);
+    }
+
+    public function testReachablePingSurfacesKeyValidityAndOrganizationPaused(): void
+    {
+        $pingService = $this->createStub(PingService::class);
+        $pingService->method('ping')->willReturn(
+            new PingResult(reachable: true, httpStatus: 200, organizationPaused: true)
+        );
+
+        $snapshot = $this->provider(pingService: $pingService)->snapshot($this->now());
+
+        self::assertTrue($snapshot->reachable);
+        self::assertNull($snapshot->unreachableError);
+        self::assertTrue($snapshot->keyValid);
+        self::assertTrue($snapshot->organizationPaused);
+    }
+
+    public function testSurfacesBufferAndDroppedEventCounts(): void
+    {
+        $bufferRepository = $this->createStub(ReportBufferRepository::class);
+        $bufferRepository->method('bufferedCount')->willReturn(7);
+        $bufferRepository->method('lastSuccessfulSubmissionAt')
+            ->willReturn(new \DateTimeImmutable('2026-08-14T08:00:00+00:00'));
+
+        $eventCounterRepository = $this->createStub(EventCounterRepository::class);
+        $eventCounterRepository->method('totalDroppedInLast24Hours')->willReturn(4);
+
+        $snapshot = $this->provider(
+            bufferRepository: $bufferRepository,
+            eventCounterRepository: $eventCounterRepository,
+        )->snapshot($this->now());
+
+        self::assertSame(7, $snapshot->bufferedReportCount);
+        self::assertSame(4, $snapshot->droppedEventCountLast24Hours);
+        self::assertSame(
+            '2026-08-14T08:00:00+00:00',
+            $snapshot->lastSuccessfulSubmissionAt?->format(\DateTimeInterface::ATOM)
+        );
+    }
+
+    public function testSurfacesCronHealthFromHealthStateRepository(): void
+    {
+        $healthStateRepository = $this->createStub(HealthStateRepository::class);
+        $healthStateRepository->method('get')->willReturnCallback(
+            fn (string $eventType) => new HealthState(
+                eventType: $eventType,
+                lastSuccessAt: null,
+                lastFailureAt: null,
+                pendingStatus: null,
+                confirmedStatus: SignalStatus::Normal,
+                sequenceNumber: 12,
+            )
+        );
+
+        $snapshot = $this->provider(healthStateRepository: $healthStateRepository)->snapshot($this->now());
+
+        self::assertSame(CronHealthEvaluator::EVENT_TYPE, $snapshot->cronHealth->category);
+        self::assertSame(SignalStatus::Normal, $snapshot->cronHealth->status);
+        self::assertSame(12, $snapshot->cronHealth->sequenceNumber);
+    }
+
+    /**
+     * Every live store view gets a signal for each of the 3 dispersion
+     * categories (basket_quote, checkout, customer_account), keyed off
+     * HistorySeeder::CATEGORY_* -- integration_health is deliberately NOT
+     * included here, since this store view has no configured source.
+     */
+    public function testEachLiveStoreViewGetsTheThreeDispersionCategorySignals(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $dispersionStateRepository = $this->createStub(DispersionStateRepository::class);
+        $dispersionStateRepository->method('get')->willReturnCallback(
+            fn (int $storeViewId, string $category) => new DispersionState(
+                storeViewId: $storeViewId,
+                category: $category,
+                pendingStatus: null,
+                confirmedStatus: SignalStatus::InsufficientData,
+                sequenceNumber: 1,
+            )
+        );
+
+        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
+        $integrationHealthConfigRepository->method('get')->willReturn(null);
+
+        $snapshot = $this->provider(
+            storeManager: $storeManager,
+            dispersionStateRepository: $dispersionStateRepository,
+            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+        )->snapshot($this->now());
+
+        self::assertCount(1, $snapshot->storeViews);
+        $storeView = $snapshot->storeViews[0];
+        self::assertSame('default', $storeView->storeViewCode);
+        self::assertCount(3, $storeView->signals);
+        self::assertSame(
+            [
+                HistorySeeder::CATEGORY_BASKET_QUOTE,
+                HistorySeeder::CATEGORY_CHECKOUT,
+                HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT,
+            ],
+            array_map(static fn ($signal) => $signal->category, $storeView->signals)
+        );
+    }
+
+    /**
+     * A store view WITH a configured integration_health source gets a 4th
+     * signal for it; one WITHOUT does not -- the config repository's
+     * get() returning null is exactly the gate DiagnosticsSnapshotProvider
+     * uses to decide whether to query IntegrationHealthStateRepository at
+     * all for that store view.
+     */
+    public function testIntegrationHealthSignalOnlyAppearsWhenAConfigExists(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $dispersionStateRepository = $this->createStub(DispersionStateRepository::class);
+        $dispersionStateRepository->method('get')->willReturnCallback(
+            fn (int $storeViewId, string $category) => new DispersionState(
+                storeViewId: $storeViewId,
+                category: $category,
+                pendingStatus: null,
+                confirmedStatus: null,
+                sequenceNumber: 1,
+            )
+        );
+
+        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
+        $integrationHealthConfigRepository->method('get')->willReturn(
+            $this->createStub(IntegrationHealthConfig::class)
+        );
+
+        $integrationHealthStateRepository = $this->createStub(IntegrationHealthStateRepository::class);
+        $integrationHealthStateRepository->method('get')->willReturn(new IntegrationHealthState(
+            storeViewId: 1,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            pendingStatus: null,
+            confirmedStatus: SignalStatus::Normal,
+            sequenceNumber: 3,
+        ));
+
+        $snapshot = $this->provider(
+            storeManager: $storeManager,
+            dispersionStateRepository: $dispersionStateRepository,
+            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+            integrationHealthStateRepository: $integrationHealthStateRepository,
+        )->snapshot($this->now());
+
+        $signals = $snapshot->storeViews[0]->signals;
+        self::assertCount(4, $signals);
+        self::assertSame('integration_health', $signals[3]->category);
+        self::assertSame(SignalStatus::Normal, $signals[3]->status);
+        self::assertSame(3, $signals[3]->sequenceNumber);
+    }
+
+    /**
+     * The isConfigured() guard lives in this shared layer rather than in
+     * each caller: an install with the module enabled but no base URL/API
+     * key saved yet would otherwise fatal with a TypeError the moment
+     * ping() is called with null arguments under strict_types.
+     */
+    public function testAnUnconfiguredInstallReturnsAnUnreachableSnapshotWithoutCallingPing(): void
+    {
+        $config = $this->createStub(Config::class);
+        $config->method('isConfigured')->willReturn(false);
+
+        $pingService = $this->createMock(PingService::class);
+        $pingService->expects(self::never())->method('ping');
+
+        $snapshot = $this->provider(config: $config, pingService: $pingService)->snapshot($this->now());
+
+        self::assertFalse($snapshot->reachable);
+        self::assertSame('Watchtower is not configured.', $snapshot->unreachableError);
+        self::assertNull($snapshot->keyValid);
+        self::assertNull($snapshot->organizationPaused);
+        self::assertSame([], $snapshot->storeViews);
+        self::assertSame([], $snapshot->recentSubmissionOutcomes);
+    }
+
+    public function testRecentSubmissionOutcomesAreSurfacedNewestFirst(): void
+    {
+        $outcomes = [
+            new SubmissionOutcome(true, 5, 0, [], null, new \DateTimeImmutable('2026-08-14T08:00:00+00:00')),
+            new SubmissionOutcome(
+                false,
+                0,
+                1,
+                ['store view not recognised for this install' => 1],
+                'boom',
+                new \DateTimeImmutable('2026-08-14T07:00:00+00:00')
+            ),
+        ];
+
+        $submissionOutcomeRepository = $this->createStub(SubmissionOutcomeRepository::class);
+        $submissionOutcomeRepository->method('recent')->willReturn($outcomes);
+
+        $snapshot = $this->provider(
+            submissionOutcomeRepository: $submissionOutcomeRepository,
+        )->snapshot($this->now());
+
+        self::assertSame($outcomes, $snapshot->recentSubmissionOutcomes);
+    }
+
+    private function provider(
+        ?Config $config = null,
+        ?PingService $pingService = null,
+        ?ReportBufferRepository $bufferRepository = null,
+        ?EventCounterRepository $eventCounterRepository = null,
+        ?HealthStateRepository $healthStateRepository = null,
+        ?DispersionStateRepository $dispersionStateRepository = null,
+        ?IntegrationHealthStateRepository $integrationHealthStateRepository = null,
+        ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
+        ?StoreManagerInterface $storeManager = null,
+        ?SubmissionOutcomeRepository $submissionOutcomeRepository = null,
+    ): DiagnosticsSnapshotProvider {
+        if ($config === null) {
+            $config = $this->createStub(Config::class);
+            $config->method('isConfigured')->willReturn(true);
+            $config->method('baseUrl')->willReturn('https://watchtower.test');
+            $config->method('apiKey')->willReturn('test-key');
+        }
+
+        if ($pingService === null) {
+            $pingService = $this->createStub(PingService::class);
+            $pingService->method('ping')->willReturn(new PingResult(reachable: true, httpStatus: 200));
+        }
+
+        if ($bufferRepository === null) {
+            $bufferRepository = $this->createStub(ReportBufferRepository::class);
+            $bufferRepository->method('bufferedCount')->willReturn(0);
+            $bufferRepository->method('lastSuccessfulSubmissionAt')->willReturn(null);
+        }
+
+        if ($eventCounterRepository === null) {
+            $eventCounterRepository = $this->createStub(EventCounterRepository::class);
+            $eventCounterRepository->method('totalDroppedInLast24Hours')->willReturn(0);
+        }
+
+        if ($healthStateRepository === null) {
+            $healthStateRepository = $this->createStub(HealthStateRepository::class);
+            $healthStateRepository->method('get')->willReturnCallback(
+                fn (string $eventType) => new HealthState($eventType, null, null, null, null, 0)
+            );
+        }
+
+        if ($dispersionStateRepository === null) {
+            $dispersionStateRepository = $this->createStub(DispersionStateRepository::class);
+            $dispersionStateRepository->method('get')->willReturnCallback(
+                fn (int $storeViewId, string $category) => new DispersionState($storeViewId, $category, null, null, 0)
+            );
+        }
+
+        if ($integrationHealthStateRepository === null) {
+            $integrationHealthStateRepository = $this->createStub(IntegrationHealthStateRepository::class);
+        }
+
+        if ($integrationHealthConfigRepository === null) {
+            $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
+            $integrationHealthConfigRepository->method('get')->willReturn(null);
+        }
+
+        if ($storeManager === null) {
+            $storeManager = $this->createStub(StoreManagerInterface::class);
+            $storeManager->method('getStores')->willReturn([]);
+        }
+
+        if ($submissionOutcomeRepository === null) {
+            $submissionOutcomeRepository = $this->createStub(SubmissionOutcomeRepository::class);
+            $submissionOutcomeRepository->method('recent')->willReturn([]);
+        }
+
+        return new DiagnosticsSnapshotProvider(
+            $config,
+            $pingService,
+            $bufferRepository,
+            $eventCounterRepository,
+            $healthStateRepository,
+            $dispersionStateRepository,
+            $integrationHealthStateRepository,
+            $integrationHealthConfigRepository,
+            new LiveStoreViewResolver($storeManager),
+            $submissionOutcomeRepository,
+        );
+    }
+
+    private function now(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable(self::NOW_STRING);
+    }
+}

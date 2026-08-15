@@ -1,0 +1,14 @@
+<?php
+/** @var \Watchtower\Connector\Block\Adminhtml\System\Config\TestConnectionButton $block */
+/** @var \Magento\Framework\Escaper $escaper */
+?>
+<button type="button"
+        class="scalable"
+        id="<?= $escaper->escapeHtmlAttr($block->getButtonHtmlId()) ?>"
+        data-mage-init='{"watchtowerTestConnection": {
+            "url": "<?= $escaper->escapeUrl($block->getAjaxUrl()) ?>",
+            "elementId": "<?= $escaper->escapeHtmlAttr($block->getButtonHtmlId()) ?>"
+        }}'>
+    <span><?= $escaper->escapeHtml(__('Test Connection')) ?></span>
+</button>
+<div id="<?= $escaper->escapeHtmlAttr($block->getButtonHtmlId()) ?>_result" style="margin-top: 10px;"></div>

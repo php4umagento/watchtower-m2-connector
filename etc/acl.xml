@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:Acl/etc/acl.xsd">
+    <acl>
+        <resources>
+            <resource id="Magento_Backend::admin">
+                <resource id="Magento_Backend::stores">
+                    <resource id="Magento_Backend::stores_settings">
+                        <resource id="Magento_Config::config">
+                            <resource id="Watchtower_Connector::config_watchtower" title="Watchtower Section"
+                                      translate="title" sortOrder="1100"/>
+                        </resource>
+                    </resource>
+                </resource>
+                <resource id="Watchtower_Connector::watchtower" title="Watchtower" translate="title" sortOrder="65">
+                    <resource id="Watchtower_Connector::integration_health" title="Integration Health Sources"
+                              translate="title" sortOrder="10"/>
+                    <resource id="Watchtower_Connector::diagnostics" title="Diagnostics"
+                              translate="title" sortOrder="20"/>
+                </resource>
+            </resource>
+        </resources>
+    </acl>
+</config>

@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Backend:etc/menu.xsd">
+    <menu>
+        <add id="Watchtower_Connector::watchtower" title="Watchtower" translate="title"
+             module="Watchtower_Connector" sortOrder="65" resource="Watchtower_Connector::watchtower"/>
+        <add id="Watchtower_Connector::integration_health" title="Integration Health Sources" translate="title"
+             module="Watchtower_Connector" sortOrder="10" parent="Watchtower_Connector::watchtower"
+             action="watchtower/integrationhealth/index" resource="Watchtower_Connector::integration_health"/>
+        <add id="Watchtower_Connector::diagnostics" title="Diagnostics" translate="title"
+             module="Watchtower_Connector" sortOrder="20" parent="Watchtower_Connector::watchtower"
+             action="watchtower/diagnostics/index" resource="Watchtower_Connector::diagnostics"/>
+    </menu>
+</config>

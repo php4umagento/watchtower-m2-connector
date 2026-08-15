@@ -1,0 +1,6 @@
+# oh-my-claudecode / Claude Code tooling state -- operational artifacts from
+# building this module, never module source. Found leaked into this
+# directory during C6 packaging work (same class of issue a C4 deslop pass
+# already cleaned up once); excluded here rather than deleted, since it may
+# be a still-active session's own state.
+/.omc/

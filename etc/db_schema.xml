@@ -1,0 +1,249 @@
+<?xml version="1.0"?>
+<schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:Setup/Declaration/Schema/etc/schema.xsd">
+    <!-- Table comment= must stay short, plain ASCII punctuation only:
+         no apostrophes (breaks the generated ALTER TABLE COMMENT= SQL)
+         and no double hyphens in any XML comment (breaks the XML parser). -->
+    <table name="watchtower_health_state" resource="default" engine="innodb"
+           comment="Durable state for the cron_health signal.">
+        <column xsi:type="varchar" name="event_type" nullable="false" length="32"
+                comment="Tracked signal event type, e.g. cron_health"/>
+        <column xsi:type="datetime" name="last_success_at" nullable="true"
+                comment="Most recently observed success"/>
+        <column xsi:type="datetime" name="last_failure_at" nullable="true"
+                comment="Most recently observed failure"/>
+        <column xsi:type="varchar" name="pending_status" nullable="true" length="20"
+                comment="Raw status awaiting a second consecutive confirmation"/>
+        <column xsi:type="varchar" name="confirmed_status" nullable="true" length="20"
+                comment="Last confirmed, reported status"/>
+        <column xsi:type="int" name="sequence_number" unsigned="true" nullable="false" default="1"
+                comment="Next sequence number for this event type"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last evaluated"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="event_type"/>
+        </constraint>
+    </table>
+    <table name="watchtower_report_buffer" resource="default" engine="innodb"
+           comment="Reports that failed to submit, queued for retry.">
+        <column xsi:type="int" name="buffer_id" identity="true" unsigned="true" nullable="false"
+                comment="Buffer row id"/>
+        <column xsi:type="varchar" name="store_view_code" nullable="true" length="64"
+                comment="Null for install-scoped signals"/>
+        <column xsi:type="varchar" name="event_type" nullable="false" length="32"
+                comment="Tracked signal event type, e.g. cron_health"/>
+        <column xsi:type="varchar" name="status" nullable="false" length="20"
+                comment="SignalStatus value when this report was produced"/>
+        <column xsi:type="int" name="sequence_number" unsigned="true" nullable="false"
+                comment="Sequence number assigned at evaluation, fixed on retry"/>
+        <column xsi:type="datetime" name="evaluated_at" nullable="false"
+                comment="Original evaluation instant, in UTC, fixed on retry"/>
+        <column xsi:type="varchar" name="reason" nullable="false" length="20"
+                comment="ReportReason value when this report was produced"/>
+        <column xsi:type="varchar" name="ruleset_version" nullable="false" length="20"
+                comment="Ruleset version in effect when produced"/>
+        <column xsi:type="timestamp" name="created_at" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="When this report was first buffered"/>
+        <!-- Per-row retry bookkeeping, superseded by the shared clock in
+             watchtower_submission_backoff. Magento only drops a column when
+             it is explicitly disabled, not merely omitted from the schema. -->
+        <column xsi:type="smallint" name="attempt_count" disabled="true"/>
+        <column xsi:type="datetime" name="next_attempt_at" disabled="true"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="buffer_id"/>
+        </constraint>
+        <index referenceId="WATCHTOWER_REPORT_BUFFER_NEXT_ATTEMPT_AT" indexType="btree" disabled="true">
+            <column name="next_attempt_at"/>
+        </index>
+    </table>
+    <table name="watchtower_submission_backoff" resource="default" engine="innodb"
+           comment="Shared retry backoff clock, plus the last successful submission time.">
+        <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
+        <column xsi:type="smallint" name="attempt_count" unsigned="true" nullable="false" default="0"
+                comment="Consecutive submission failures so far"/>
+        <column xsi:type="datetime" name="next_attempt_at" nullable="false"
+                comment="Not retried before this instant"/>
+        <column xsi:type="datetime" name="last_success_at" nullable="true"
+                comment="When a submission last succeeded, for the diagnostics page/watchtower:status"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last updated"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="id"/>
+        </constraint>
+    </table>
+    <table name="watchtower_organization_state" resource="default" engine="innodb"
+           comment="Locally cached organization_paused flag, singleton row.">
+        <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
+        <column xsi:type="boolean" name="organization_paused" nullable="false" default="false"
+                comment="Last known organization_paused state"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last updated"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="id"/>
+        </constraint>
+    </table>
+    <table name="watchtower_submission_outcome_log" resource="default" engine="innodb"
+           comment="Last N submission outcomes, self-pruned to newest N on every write.">
+        <column xsi:type="int" name="id" unsigned="true" nullable="false" identity="true" comment="Row id"/>
+        <column xsi:type="boolean" name="succeeded" nullable="false"
+                comment="Whether this submission attempt succeeded"/>
+        <column xsi:type="int" name="accepted_count" unsigned="true" nullable="false" default="0"
+                comment="Reports the platform accepted"/>
+        <column xsi:type="int" name="rejected_count" unsigned="true" nullable="false" default="0"
+                comment="Reports the platform rejected (still counted as a successful HTTP round-trip)"/>
+        <column xsi:type="varchar" name="error_message" nullable="true" length="255"
+                comment="Set only when succeeded=false"/>
+        <column xsi:type="text" name="rejection_reasons" nullable="true"
+                comment="JSON object of reason string to count, for the rejected reports in this attempt"/>
+        <column xsi:type="datetime" name="occurred_at" nullable="false" comment="When this attempt happened"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="id"/>
+        </constraint>
+    </table>
+    <table name="watchtower_rollup_hourly" resource="default" engine="innodb"
+           comment="Per store view/category hourly counts, retained ~90 days.">
+        <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
+                comment="Magento store view id"/>
+        <column xsi:type="varchar" name="category" nullable="false" length="64"
+                comment="Signal name, e.g. basket_quote, checkout, customer_account"/>
+        <column xsi:type="datetime" name="hour_bucket" nullable="false"
+                comment="UTC top-of-hour instant this row counts"/>
+        <column xsi:type="int" name="count" unsigned="true" nullable="false" default="0"
+                comment="Event count observed in this hour"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last written"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="store_view_id"/>
+            <column name="category"/>
+            <column name="hour_bucket"/>
+        </constraint>
+    </table>
+    <table name="watchtower_rollup_daily" resource="default" engine="innodb"
+           comment="Per store view/category daily counts, retained 400+ days.">
+        <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
+                comment="Magento store view id"/>
+        <column xsi:type="varchar" name="category" nullable="false" length="64"
+                comment="Signal name, e.g. basket_quote, checkout, customer_account"/>
+        <column xsi:type="date" name="day_bucket" nullable="false"
+                comment="UTC calendar day this row counts"/>
+        <column xsi:type="int" name="count" unsigned="true" nullable="false" default="0"
+                comment="Event count summed from that day's hourly rows"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last written"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="store_view_id"/>
+            <column name="category"/>
+            <column name="day_bucket"/>
+        </constraint>
+    </table>
+    <table name="watchtower_event_counter" resource="default" engine="innodb"
+           comment="Per store view event-bus counters, e.g. customer_login and customer_logout.">
+        <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
+                comment="Magento store view id"/>
+        <column xsi:type="varchar" name="event_name" nullable="false" length="32"
+                comment="Dispatched event name, e.g. customer_login"/>
+        <column xsi:type="datetime" name="hour_bucket" nullable="false"
+                comment="UTC top-of-hour instant this row counts"/>
+        <column xsi:type="int" name="count" unsigned="true" nullable="false" default="0"
+                comment="Event count observed in this hour"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last written"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="store_view_id"/>
+            <column name="event_name"/>
+            <column name="hour_bucket"/>
+        </constraint>
+    </table>
+    <table name="watchtower_dispersion_state" resource="default" engine="innodb"
+           comment="Durable debounce state for Check A, per store view and category.">
+        <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
+                comment="Magento store view id"/>
+        <column xsi:type="varchar" name="category" nullable="false" length="64"
+                comment="Signal category, e.g. basket_quote, checkout, customer_account"/>
+        <column xsi:type="varchar" name="pending_status" nullable="true" length="20"
+                comment="Raw status awaiting a second consecutive confirmation"/>
+        <column xsi:type="varchar" name="confirmed_status" nullable="true" length="20"
+                comment="Last confirmed, reported status"/>
+        <column xsi:type="int" name="sequence_number" unsigned="true" nullable="false" default="1"
+                comment="Next sequence number for this store view and category"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last evaluated"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="store_view_id"/>
+            <column name="category"/>
+        </constraint>
+    </table>
+    <table name="watchtower_event_drop_counter" resource="default" engine="innodb"
+           comment="Local diagnostic count of events with no resolvable store, never transmitted.">
+        <column xsi:type="varchar" name="event_name" nullable="false" length="32"
+                comment="Dispatched event name, e.g. customer_login"/>
+        <column xsi:type="datetime" name="hour_bucket" nullable="false"
+                comment="UTC top-of-hour instant this row counts"/>
+        <column xsi:type="int" name="count" unsigned="true" nullable="false" default="0"
+                comment="Dropped event count observed in this hour"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last written"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="event_name"/>
+            <column name="hour_bucket"/>
+        </constraint>
+    </table>
+    <table name="watchtower_integration_health_config" resource="default" engine="innodb"
+           comment="Per-store-view configured integration_health source (admin source picker).">
+        <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
+                comment="Magento store view id"/>
+        <column xsi:type="varchar" name="source_type" nullable="false" length="20"
+                comment="cron_job, queue_consumer, or convention_event"/>
+        <column xsi:type="varchar" name="source_identifier" nullable="false" length="255"
+                comment="A job_code, topic_name, or integration label, depending on source_type"/>
+        <column xsi:type="int" name="expected_max_interval_minutes" unsigned="true" nullable="false"
+                comment="How long a success may go unrenewed before this store view reports DOWN"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last saved"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="store_view_id"/>
+        </constraint>
+    </table>
+    <table name="watchtower_integration_health_event" resource="default" engine="innodb"
+           comment="Local snapshot of watchtower_integration_health event dispatches (source #3).">
+        <column xsi:type="int" name="id" unsigned="true" nullable="false" identity="true"
+                comment="Row id"/>
+        <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
+                comment="Magento store view id this dispatch is attributed to"/>
+        <column xsi:type="varchar" name="integration_label" nullable="false" length="64"
+                comment="The integration label the dispatching module supplied"/>
+        <column xsi:type="varchar" name="status" nullable="false" length="6"
+                comment="ok or failed, as dispatched"/>
+        <column xsi:type="datetime" name="observed_at" nullable="false"
+                comment="When this dispatch was observed"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="id"/>
+        </constraint>
+        <index referenceId="WATCHTOWER_INTEGRATION_HEALTH_EVENT_LOOKUP" indexType="btree">
+            <column name="store_view_id"/>
+            <column name="integration_label"/>
+            <column name="status"/>
+            <column name="observed_at"/>
+        </index>
+    </table>
+    <table name="watchtower_integration_health_state" resource="default" engine="innodb"
+           comment="Durable debounce state for integration_health, per store view.">
+        <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
+                comment="Magento store view id"/>
+        <column xsi:type="datetime" name="last_success_at" nullable="true"
+                comment="Most recently observed success"/>
+        <column xsi:type="datetime" name="last_failure_at" nullable="true"
+                comment="Most recently observed failure"/>
+        <column xsi:type="varchar" name="pending_status" nullable="true" length="20"
+                comment="Raw status awaiting a second consecutive confirmation"/>
+        <column xsi:type="varchar" name="confirmed_status" nullable="true" length="20"
+                comment="Last confirmed, reported status"/>
+        <column xsi:type="int" name="sequence_number" unsigned="true" nullable="false" default="1"
+                comment="Next sequence number for this store view"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last evaluated"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="store_view_id"/>
+        </constraint>
+    </table>
+</schema>

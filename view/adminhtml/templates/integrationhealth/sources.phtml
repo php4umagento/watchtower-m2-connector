@@ -1,0 +1,126 @@
+<?php
+/** @var \Watchtower\Connector\Block\Adminhtml\IntegrationHealth\Sources $block */
+/** @var \Magento\Framework\Escaper $escaper */
+$sourceTypeOptions = $block->getSourceTypeOptions();
+$intro = __('Choose at most one source per store view. Store views left unconfigured are not evaluated.');
+$maxInterval = $block->getMaxExpectedMaxIntervalMinutes();
+$maxLabelLength = $block->getMaxConventionEventLabelLength();
+$conventionEventClass = "admin__control-text required-entry validate-length maximum-length-{$maxLabelLength}";
+$intervalClass = "admin__control-text validate-digits validate-digits-range digits-range-1-{$maxInterval}";
+?>
+<div id="watchtower_integration_health"
+     data-mage-init='{"watchtowerIntegrationHealth": {
+         "saveUrl": "<?= $escaper->escapeUrl($block->getSaveUrl()) ?>",
+         "deleteUrl": "<?= $escaper->escapeUrl($block->getDeleteUrl()) ?>",
+         "cronJobsUrl": "<?= $escaper->escapeUrl($block->getCronJobsUrl()) ?>",
+         "queueTopicsUrl": "<?= $escaper->escapeUrl($block->getQueueTopicsUrl()) ?>"
+     }}'>
+    <p><?= $escaper->escapeHtml($intro) ?></p>
+    <!--
+        jQuery Validation's own rules() reader (lib/web/jquery/jquery.validate.js)
+        hard-requires the field's native element.form to be non-null before it will
+        read even a class-based rule like validate-select -- with no enclosing <form>
+        at all, every rule silently no-ops and .form() always reports valid. This
+        wrapper only needs to exist; mage/backend/validation's own elements()
+        override scopes each row's Validator to that row's <tr> by DOM containment,
+        not by matching this form, so one shared <form> does not defeat the
+        per-row validation in integration-health.js.
+    -->
+    <form id="watchtower_integration_health_form" onsubmit="return false;">
+    <table class="data-grid">
+        <thead>
+            <tr>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Store View')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Source Type')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Source Identifier')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Expected Max Interval (minutes)')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Actions')) ?></th>
+            </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($block->getLiveStoreViews() as $storeView): ?>
+            <?php
+            $storeViewId = (int) $storeView->getId();
+            $config = $block->getConfigFor($storeViewId);
+            $selectedType = $config !== null ? $config->sourceType : '';
+            $identifier = $config !== null ? $config->sourceIdentifier : '';
+            $interval = $config !== null
+                ? (string) $config->expectedMaxIntervalMinutes
+                : (string) $block->getDefaultExpectedMaxIntervalMinutes();
+            $identifierFor = static fn (string $type): string => $selectedType === $type ? $identifier : '';
+            // Short alias so the field name/id attributes below (each escaped
+            // at its own echo site, per Magento2.Security.XssTemplate) stay
+            // under the line-length limit.
+            $rowIdSuffix = (string) $storeViewId;
+            ?>
+            <tr data-store-view-row="<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>">
+                <td class="data-grid-td">
+                    <strong><?= $escaper->escapeHtml($storeView->getCode()) ?></strong><br>
+                    <?= $escaper->escapeHtml($storeView->getName()) ?>
+                </td>
+                <td class="data-grid-td">
+                    <select class="admin__control-select validate-select"
+                            id="source_type_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                            name="source_type_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                            data-role="source-type">
+                        <option value=""><?= $escaper->escapeHtml(__('-- Not configured --')) ?></option>
+                        <?php foreach ($sourceTypeOptions as $value => $label): ?>
+                            <option value="<?= $escaper->escapeHtmlAttr($value) ?>"
+                                <?= $selectedType === $value ? 'selected="selected"' : '' ?>>
+                                <?= $escaper->escapeHtml($label) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </td>
+                <td class="data-grid-td">
+                    <select class="admin__control-select validate-select"
+                            id="source_identifier_cron_job_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                            name="source_identifier_cron_job_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                            data-source-identifier-for="cron_job"
+                            data-selected="<?= $escaper->escapeHtmlAttr($identifierFor('cron_job')) ?>">
+                        <option value=""><?= $escaper->escapeHtml(__('-- Select a cron job --')) ?></option>
+                    </select>
+                    <select class="admin__control-select validate-select"
+                            id="source_identifier_queue_consumer_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                            name="source_identifier_queue_consumer_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                            data-source-identifier-for="queue_consumer"
+                            data-selected="<?= $escaper->escapeHtmlAttr($identifierFor('queue_consumer')) ?>">
+                        <option value=""><?= $escaper->escapeHtml(__('-- Select a queue topic --')) ?></option>
+                    </select>
+                    <input type="text"
+                           class="<?= $escaper->escapeHtmlAttr($conventionEventClass) ?>"
+                           id="source_identifier_convention_event_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                           name="source_identifier_convention_event_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                           maxlength="<?= (int) $maxLabelLength ?>"
+                           data-source-identifier-for="convention_event"
+                           placeholder="<?= $escaper->escapeHtmlAttr(__('Integration label')) ?>"
+                           value="<?= $escaper->escapeHtmlAttr($identifierFor('convention_event')) ?>">
+                </td>
+                <td class="data-grid-td">
+                    <input type="number"
+                           min="1"
+                           max="<?= (int) $maxInterval ?>"
+                           class="<?= $escaper->escapeHtmlAttr($intervalClass) ?>"
+                           id="expected_max_interval_minutes_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                           name="expected_max_interval_minutes_<?= $escaper->escapeHtmlAttr($rowIdSuffix) ?>"
+                           data-role="expected-max-interval"
+                           value="<?= $escaper->escapeHtmlAttr($interval) ?>">
+                </td>
+                <td class="data-grid-td">
+                    <button type="button" class="action-secondary" data-role="save">
+                        <span><?= $escaper->escapeHtml(__('Save')) ?></span>
+                    </button>
+                    <button type="button"
+                            class="action-secondary"
+                            data-role="clear"
+                            <?= $config === null ? 'style="display: none;"' : '' ?>>
+                        <span><?= $escaper->escapeHtml(__('Clear')) ?></span>
+                    </button>
+                    <div data-role="messages"></div>
+                </td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    </form>
+</div>

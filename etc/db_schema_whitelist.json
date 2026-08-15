@@ -1,0 +1,174 @@
+{
+    "watchtower_health_state": {
+        "column": {
+            "event_type": true,
+            "last_success_at": true,
+            "last_failure_at": true,
+            "pending_status": true,
+            "confirmed_status": true,
+            "sequence_number": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_report_buffer": {
+        "column": {
+            "buffer_id": true,
+            "store_view_code": true,
+            "event_type": true,
+            "status": true,
+            "sequence_number": true,
+            "evaluated_at": true,
+            "reason": true,
+            "ruleset_version": true,
+            "created_at": true,
+            "attempt_count": true,
+            "next_attempt_at": true
+        },
+        "index": {
+            "WATCHTOWER_REPORT_BUFFER_NEXT_ATTEMPT_AT": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_submission_backoff": {
+        "column": {
+            "id": true,
+            "attempt_count": true,
+            "next_attempt_at": true,
+            "updated_at": true,
+            "last_success_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_rollup_hourly": {
+        "column": {
+            "store_view_id": true,
+            "category": true,
+            "hour_bucket": true,
+            "count": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_rollup_daily": {
+        "column": {
+            "store_view_id": true,
+            "category": true,
+            "day_bucket": true,
+            "count": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_dispersion_state": {
+        "column": {
+            "store_view_id": true,
+            "category": true,
+            "pending_status": true,
+            "confirmed_status": true,
+            "sequence_number": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_event_counter": {
+        "column": {
+            "store_view_id": true,
+            "event_name": true,
+            "hour_bucket": true,
+            "count": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_event_drop_counter": {
+        "column": {
+            "event_name": true,
+            "hour_bucket": true,
+            "count": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_integration_health_config": {
+        "column": {
+            "store_view_id": true,
+            "source_type": true,
+            "source_identifier": true,
+            "expected_max_interval_minutes": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_integration_health_event": {
+        "column": {
+            "id": true,
+            "store_view_id": true,
+            "integration_label": true,
+            "status": true,
+            "observed_at": true
+        },
+        "index": {
+            "IDX_F22DB26C4765CA83CFF75CF200EDEF1F": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_integration_health_state": {
+        "column": {
+            "store_view_id": true,
+            "last_success_at": true,
+            "last_failure_at": true,
+            "pending_status": true,
+            "confirmed_status": true,
+            "sequence_number": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_organization_state": {
+        "column": {
+            "id": true,
+            "organization_paused": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_submission_outcome_log": {
+        "column": {
+            "id": true,
+            "succeeded": true,
+            "accepted_count": true,
+            "rejected_count": true,
+            "error_message": true,
+            "occurred_at": true,
+            "rejection_reasons": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    }
+}
