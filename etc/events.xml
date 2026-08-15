@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:Event/etc/events.xsd">
+    <event name="customer_login">
+        <observer name="watchtower_customer_login_counter"
+                  instance="Watchtower\Connector\Model\EventCounter\CustomerSessionObserver"/>
+    </event>
+    <event name="customer_logout">
+        <observer name="watchtower_customer_logout_counter"
+                  instance="Watchtower\Connector\Model\EventCounter\CustomerSessionObserver"/>
+    </event>
+    <event name="watchtower_integration_health">
+        <observer name="watchtower_integration_health_event_snapshot"
+                  instance="Watchtower\Connector\Model\IntegrationHealth\ConventionEventObserver"/>
+    </event>
+</config>

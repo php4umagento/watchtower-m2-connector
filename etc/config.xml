@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Store:etc/config.xsd">
+    <default>
+        <watchtower>
+            <general>
+                <!--
+                    Every install talks to the same one Watchtower platform,
+                    so this is pre-filled rather than left for each merchant
+                    to type. Still a plain config value, not hardcoded in
+                    PHP, so a merchant can override it if that ever changes.
+                -->
+                <base_url>https://watchtower-commerce.com</base_url>
+
+                <!--
+                    Explicit, not implicit: a fresh install has no api_key
+                    either, so this being unset would behave the same way in
+                    practice, but declaring it stops a scheduled job from
+                    silently reading "enabled" as false only by accident of
+                    no row existing yet. The merchant explicitly toggles
+                    this to Yes as part of onboarding.
+                -->
+                <enabled>0</enabled>
+            </general>
+        </watchtower>
+    </default>
+</config>

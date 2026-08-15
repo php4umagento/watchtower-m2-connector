@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Cron:etc/crontab.xsd">
+    <group id="default">
+        <!--
+            Polled every 5 minutes, but Cron\ReportJob's own jitter guard
+            (see that class's docblock) makes the real evaluate-and-submit
+            cycle actually run only once per hour, at a per-install offset
+            derived from the install's own API key rather than always at
+            :00. Every install ships the identical etc/crontab.xml, so a
+            fixed schedule here would mean every merchant's connector
+            submits at the same wall-clock moment; ReportJob itself no-ops
+            on 11 of every 12 ticks to avoid that.
+        -->
+        <job name="watchtower_report" instance="Watchtower\Connector\Cron\ReportJob" method="execute">
+            <schedule>*/5 * * * *</schedule>
+        </job>
+
+        <!--
+            Daily rather than hourly: store views change rarely (a
+            merchant adding/removing/renaming one is an occasional admin
+            action, not something worth checking every hour). The
+            on-enable trigger (Model\Config\Backend\EnabledSyncTrigger)
+            already covers the immediate case; this schedule is just the
+            ongoing backstop.
+        -->
+        <job name="watchtower_sync" instance="Watchtower\Connector\Cron\SyncJob" method="execute">
+            <schedule>30 2 * * *</schedule>
+        </job>
+
+        <!--
+            Daily, off the hourly report job's own tick: hourly detail is
+            kept ~90 days and daily rollups are kept 400+ days, so a daily
+            cadence is comfortably more frequent than the rollup logic
+            needs to stay within its windows. Timing precision here does
+            not matter the way it does for watchtower_report's own
+            submission cadence.
+        -->
+        <job name="watchtower_rollup_prune" instance="Watchtower\Connector\Cron\RollupPruneJob" method="execute">
+            <schedule>0 3 * * *</schedule>
+        </job>
+    </group>
+</config>

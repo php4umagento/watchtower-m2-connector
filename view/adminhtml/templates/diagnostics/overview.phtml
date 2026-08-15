@@ -1,0 +1,149 @@
+<?php
+/** @var \Watchtower\Connector\Block\Adminhtml\Diagnostics\Overview $block */
+/** @var \Magento\Framework\Escaper $escaper */
+$snapshot = $block->getSnapshot();
+?>
+<div id="watchtower_diagnostics">
+    <div class="admin__fieldset-wrapper">
+        <div class="admin__fieldset-wrapper-title">
+            <strong><?= $escaper->escapeHtml(__('Connection State')) ?></strong>
+        </div>
+        <table class="data-grid">
+            <tbody>
+            <tr>
+                <td class="data-grid-td"><?= $escaper->escapeHtml(__('Reachable')) ?></td>
+                <td class="data-grid-td">
+                    <?php if ($snapshot->reachable): ?>
+                        <?= $escaper->escapeHtml(__('Yes')) ?>
+                    <?php else: ?>
+                        <?= $escaper->escapeHtml(__('No')) ?>
+                        (<?= $escaper->escapeHtml((string) $snapshot->unreachableError) ?>)
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php if ($snapshot->reachable): ?>
+                <tr>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml(__('Key Valid')) ?></td>
+                    <td class="data-grid-td">
+                        <?= $escaper->escapeHtml($snapshot->keyValid ? __('Yes') : __('No')) ?>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml(__('Organization Paused')) ?></td>
+                    <td class="data-grid-td">
+                        <?= $escaper->escapeHtml($snapshot->organizationPaused ? __('Yes') : __('No')) ?>
+                    </td>
+                </tr>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="admin__fieldset-wrapper">
+        <div class="admin__fieldset-wrapper-title">
+            <strong><?= $escaper->escapeHtml(__('Submission State')) ?></strong>
+        </div>
+        <table class="data-grid">
+            <tbody>
+            <tr>
+                <td class="data-grid-td"><?= $escaper->escapeHtml(__('Last Successful Submission')) ?></td>
+                <td class="data-grid-td">
+                    <?= $escaper->escapeHtml($block->formatDateTime($snapshot->lastSuccessfulSubmissionAt)) ?>
+                </td>
+            </tr>
+            <tr>
+                <td class="data-grid-td"><?= $escaper->escapeHtml(__('Buffered Reports')) ?></td>
+                <td class="data-grid-td"><?= $escaper->escapeHtml((string) $snapshot->bufferedReportCount) ?></td>
+            </tr>
+            <tr>
+                <td class="data-grid-td"><?= $escaper->escapeHtml(__('Dropped Events (Last 24h)')) ?></td>
+                <td class="data-grid-td">
+                    <?= $escaper->escapeHtml((string) $snapshot->droppedEventCountLast24Hours) ?>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="admin__fieldset-wrapper">
+        <div class="admin__fieldset-wrapper-title">
+            <strong><?= $escaper->escapeHtml(__('Signal Status')) ?></strong>
+        </div>
+        <table class="data-grid">
+            <thead>
+            <tr>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Store View')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Signal')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Status')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Sequence Number')) ?></th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td class="data-grid-td"><?= $escaper->escapeHtml(__('(install-wide)')) ?></td>
+                <td class="data-grid-td"><?= $escaper->escapeHtml($snapshot->cronHealth->category) ?></td>
+                <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($snapshot->cronHealth)) ?></td>
+                <td class="data-grid-td">
+                    <?= $escaper->escapeHtml((string) $snapshot->cronHealth->sequenceNumber) ?>
+                </td>
+            </tr>
+            <?php foreach ($snapshot->storeViews as $storeView): ?>
+                <?php foreach ($storeView->signals as $signal): ?>
+                    <tr>
+                        <td class="data-grid-td">
+                            <?= $escaper->escapeHtml($storeView->storeViewCode) ?>
+                            (id=<?= $escaper->escapeHtml((string) $storeView->storeViewId) ?>)
+                        </td>
+                        <td class="data-grid-td"><?= $escaper->escapeHtml($signal->category) ?></td>
+                        <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($signal)) ?></td>
+                        <td class="data-grid-td"><?= $escaper->escapeHtml((string) $signal->sequenceNumber) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="admin__fieldset-wrapper">
+        <div class="admin__fieldset-wrapper-title">
+            <strong><?= $escaper->escapeHtml(__('Recent Submission Outcomes')) ?></strong>
+        </div>
+        <table class="data-grid">
+            <thead>
+            <tr>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Occurred At')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Succeeded')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Accepted')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Rejected')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Rejection Reasons')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Error')) ?></th>
+            </tr>
+            </thead>
+            <tbody>
+            <?php if (count($snapshot->recentSubmissionOutcomes) === 0): ?>
+                <tr>
+                    <td class="data-grid-td" colspan="6">
+                        <?= $escaper->escapeHtml(__('No submission attempts recorded yet.')) ?>
+                    </td>
+                </tr>
+            <?php endif; ?>
+            <?php foreach ($snapshot->recentSubmissionOutcomes as $outcome): ?>
+                <tr>
+                    <td class="data-grid-td">
+                        <?= $escaper->escapeHtml($block->formatDateTime($outcome->occurredAt)) ?>
+                    </td>
+                    <td class="data-grid-td">
+                        <?= $escaper->escapeHtml($outcome->succeeded ? __('Yes') : __('No')) ?>
+                    </td>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml((string) $outcome->acceptedCount) ?></td>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml((string) $outcome->rejectedCount) ?></td>
+                    <td class="data-grid-td">
+                        <?= $escaper->escapeHtml($block->formatRejectionReasons($outcome)) ?>
+                    </td>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml((string) ($outcome->errorMessage ?? '')) ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>

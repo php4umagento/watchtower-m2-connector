@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Config:etc/system_file.xsd">
+    <system>
+        <section id="watchtower" translate="label" type="text" sortOrder="1100"
+                 showInDefault="1" showInWebsite="0" showInStore="0">
+            <label>Watchtower</label>
+            <tab>general</tab>
+            <resource>Watchtower_Connector::config_watchtower</resource>
+            <group id="general" translate="label" type="text" sortOrder="1"
+                   showInDefault="1" showInWebsite="0" showInStore="0">
+                <label>Connection</label>
+                <field id="base_url" translate="label comment" type="text" sortOrder="10"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Watchtower Base URL</label>
+                    <comment>
+                        The base URL of your Watchtower platform. Pre-filled with the live
+                        Watchtower platform; only change this for a custom deployment.
+                    </comment>
+                    <validate>required-entry validate-url</validate>
+                </field>
+                <field id="api_key" translate="label comment" type="obscure" sortOrder="20"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Install API Key</label>
+                    <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
+                    <comment>
+                        Paste the install-scoped API key generated for this install on the Watchtower projects page.
+                    </comment>
+                    <validate>required-entry</validate>
+                </field>
+                <field id="enabled" translate="label comment" type="select" sortOrder="30"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Enabled</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                    <backend_model>Watchtower\Connector\Model\Config\Backend\EnabledSyncTrigger</backend_model>
+                    <comment>
+                        Disable to stop the connector from syncing, evaluating, or submitting anything,
+                        without removing configuration.
+                    </comment>
+                </field>
+                <field id="test_connection" sortOrder="40" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label/>
+                    <frontend_model>Watchtower\Connector\Block\Adminhtml\System\Config\TestConnectionButton</frontend_model>
+                    <!-- Line length warning accepted here: frontend_model's XSD pattern
+                         forbids whitespace, so this value cannot wrap. -->
+                    <comment>Tests the currently saved Base URL and API Key. Save your changes first.</comment>
+                </field>
+            </group>
+        </section>
+    </system>
+</config>
