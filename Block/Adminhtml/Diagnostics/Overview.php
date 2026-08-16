@@ -10,9 +10,11 @@ namespace Watchtower\Connector\Block\Adminhtml\Diagnostics;
 
 use Magento\Backend\Block\Template;
 use Magento\Backend\Block\Template\Context;
+use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
 use Watchtower\Connector\Model\Diagnostics\SignalSnapshot;
+use Watchtower\Connector\Model\Diagnostics\StoreViewSnapshot;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
 
 /**
@@ -81,6 +83,25 @@ class Overview extends Template
     public function statusLabel(SignalSnapshot $signal): string
     {
         return $signal->status?->value ?? 'no data yet';
+    }
+
+    /**
+     * Whether a store view has any signal in a non-NORMAL state, so its
+     * collapsible block can default to expanded -- a store view with a real
+     * problem should never be hidden behind an extra click.
+     *
+     * @param StoreViewSnapshot $storeView
+     * @return bool
+     */
+    public function storeViewNeedsAttention(StoreViewSnapshot $storeView): bool
+    {
+        foreach ($storeView->signals as $signal) {
+            if ($signal->status !== null && $signal->status !== SignalStatus::Normal) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
