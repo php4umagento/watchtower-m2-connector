@@ -72,6 +72,53 @@ $snapshot = $block->getSnapshot();
 
     <div class="admin__fieldset-wrapper">
         <div class="admin__fieldset-wrapper-title">
+            <strong><?= $escaper->escapeHtml(__('Environment')) ?></strong>
+        </div>
+        <table class="data-grid">
+            <tbody>
+            <?php if ($snapshot->environment->syncedAt === null): ?>
+                <tr>
+                    <td class="data-grid-td" colspan="2">
+                        <?= $escaper->escapeHtml(__('No data yet -- run watchtower:sync.')) ?>
+                    </td>
+                </tr>
+            <?php else: ?>
+                <tr>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml(__('Magento')) ?></td>
+                    <td class="data-grid-td">
+                        <?= $escaper->escapeHtml((string) $snapshot->environment->magentoEdition) ?>
+                        <?= $escaper->escapeHtml((string) $snapshot->environment->magentoVersion) ?>
+                        <?php if ($snapshot->environment->magentoEol?->isEol === true): ?>
+                            <strong class="watchtower-eol-warning">
+                                <?= $escaper->escapeHtml(__(
+                                    '(end of life since %1)',
+                                    $snapshot->environment->magentoEol->eolDate ?? __('unknown date')
+                                )) ?>
+                            </strong>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml(__('Connector Version')) ?></td>
+                    <td class="data-grid-td">
+                        v<?= $escaper->escapeHtml((string) $snapshot->environment->connectorVersion) ?>
+                        <?php if ($snapshot->environment->connectorUpdate?->updateAvailable === true): ?>
+                            <strong class="watchtower-update-available">
+                                <?= $escaper->escapeHtml(__(
+                                    '(v%1 available)',
+                                    $snapshot->environment->connectorUpdate->latestVersion ?? '?'
+                                )) ?>
+                            </strong>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="admin__fieldset-wrapper">
+        <div class="admin__fieldset-wrapper-title">
             <strong><?= $escaper->escapeHtml(__('Signal Status')) ?></strong>
         </div>
         <table class="data-grid">

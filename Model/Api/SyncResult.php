@@ -22,6 +22,11 @@ class SyncResult
      * @param string[] $created
      * @param array<int,array{code:string,reason:string}> $rejected
      * @param string|null $errorMessage
+     * @param MagentoEolInfo|null $magentoEol null when the platform couldn't determine EOL status
+     *     (this request didn't report a Magento version/edition, or the platform's own lookup failed)
+     * @param ConnectorUpdateInfo|null $connectorUpdate null when the platform couldn't determine
+     *     update status (this request didn't report a connector version, or the platform's own
+     *     lookup failed)
      */
     public function __construct(
         public readonly bool $succeeded,
@@ -29,6 +34,8 @@ class SyncResult
         public readonly array $created = [],
         public readonly array $rejected = [],
         public readonly ?string $errorMessage = null,
+        public readonly ?MagentoEolInfo $magentoEol = null,
+        public readonly ?ConnectorUpdateInfo $connectorUpdate = null,
     ) {
     }
 }

@@ -170,5 +170,22 @@
         "constraint": {
             "PRIMARY": true
         }
+    },
+    "watchtower_environment_state": {
+        "column": {
+            "id": true,
+            "magento_version": true,
+            "magento_edition": true,
+            "connector_version": true,
+            "magento_is_eol": true,
+            "magento_eol_date": true,
+            "magento_status_label": true,
+            "connector_update_available": true,
+            "connector_latest_version": true,
+            "synced_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
     }
 }

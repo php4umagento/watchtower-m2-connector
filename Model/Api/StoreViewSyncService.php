@@ -10,13 +10,18 @@ namespace Watchtower\Connector\Model\Api;
 
 use Magento\Store\Api\Data\StoreInterface;
 use Psr\Log\LoggerInterface;
+use Watchtower\Connector\Model\Environment\ConnectorVersionReader;
+use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
+use Watchtower\Connector\Model\Environment\MagentoVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 
 /**
- * Reports this install's live store views to the platform. Identity and
- * presence only, no metrics, so it needs nothing beyond Magento's own store
- * hierarchy.
+ * Reports this install's live store views to the platform. Also carries this
+ * install's Magento version/edition and the connector's own installed
+ * version -- identity and environment facts, not metrics -- so the platform
+ * can flag an EOL Magento version or an outdated connector without either
+ * check depending on the module's own (possibly outdated) judgment of itself.
  */
 class StoreViewSyncService
 {
@@ -26,12 +31,18 @@ class StoreViewSyncService
      * @param LiveStoreViewResolver $liveStoreViewResolver
      * @param Client $client
      * @param OrganizationStateRepository $organizationStateRepository
+     * @param MagentoVersionReader $magentoVersionReader
+     * @param ConnectorVersionReader $connectorVersionReader
+     * @param EnvironmentStateRepository $environmentStateRepository
      * @param LoggerInterface $logger
      */
     public function __construct(
         private readonly LiveStoreViewResolver $liveStoreViewResolver,
         private readonly Client $client,
         private readonly OrganizationStateRepository $organizationStateRepository,
+        private readonly MagentoVersionReader $magentoVersionReader,
+        private readonly ConnectorVersionReader $connectorVersionReader,
+        private readonly EnvironmentStateRepository $environmentStateRepository,
         private readonly LoggerInterface $logger
     ) {
     }
@@ -69,8 +80,15 @@ class StoreViewSyncService
 
         $this->logger->debug('Watchtower syncing store views.', ['count' => count($storeViews)]);
 
+        $payload = [
+            'store_views' => $storeViews,
+            'magento_version' => $this->magentoVersionReader->version(),
+            'magento_edition' => $this->magentoVersionReader->edition(),
+            'connector_version' => $this->connectorVersionReader->version(),
+        ];
+
         try {
-            $response = $this->client->post($baseUrl, $apiKey, self::PATH, ['store_views' => $storeViews]);
+            $response = $this->client->post($baseUrl, $apiKey, self::PATH, $payload);
         } catch (\Throwable $e) {
             $this->logger->debug('Watchtower sync raised an exception.', ['error' => $e->getMessage()]);
 
@@ -98,7 +116,68 @@ class StoreViewSyncService
             'rejectedCount' => count($rejected),
         ]);
 
-        return new SyncResult(succeeded: true, synced: $synced, created: $created, rejected: $rejected);
+        $magentoEol = $this->parseMagentoEol($body['magento_eol'] ?? null);
+        $connectorUpdate = $this->parseConnectorUpdate($body['connector_update'] ?? null);
+
+        // Cached locally so watchtower:status and the Diagnostics admin page
+        // can show it without a live round trip of their own -- only a real
+        // sync ever refreshes this.
+        $this->environmentStateRepository->save(
+            $payload['magento_version'],
+            $payload['magento_edition'],
+            $payload['connector_version'],
+            $magentoEol,
+            $connectorUpdate,
+            new \DateTimeImmutable(),
+        );
+
+        return new SyncResult(
+            succeeded: true,
+            synced: $synced,
+            created: $created,
+            rejected: $rejected,
+            magentoEol: $magentoEol,
+            connectorUpdate: $connectorUpdate,
+        );
+    }
+
+    /**
+     * Parses the response's 'magento_eol' value into a typed DTO.
+     *
+     * @param mixed $raw the decoded 'magento_eol' response value, expected to be an
+     *     array{is_eol: bool, eol_date: string|null, status_label: string|null} or null
+     * @return MagentoEolInfo|null
+     */
+    private function parseMagentoEol(mixed $raw): ?MagentoEolInfo
+    {
+        if (!is_array($raw)) {
+            return null;
+        }
+
+        return new MagentoEolInfo(
+            isEol: (bool) ($raw['is_eol'] ?? false),
+            eolDate: $raw['eol_date'] ?? null,
+            statusLabel: $raw['status_label'] ?? null,
+        );
+    }
+
+    /**
+     * Parses the response's 'connector_update' value into a typed DTO.
+     *
+     * @param mixed $raw the decoded 'connector_update' response value, expected to be an
+     *     array{update_available: bool, latest_version: string|null} or null
+     * @return ConnectorUpdateInfo|null
+     */
+    private function parseConnectorUpdate(mixed $raw): ?ConnectorUpdateInfo
+    {
+        if (!is_array($raw)) {
+            return null;
+        }
+
+        return new ConnectorUpdateInfo(
+            updateAvailable: (bool) ($raw['update_available'] ?? false),
+            latestVersion: $raw['latest_version'] ?? null,
+        );
     }
 
     /**

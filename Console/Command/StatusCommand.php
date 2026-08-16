@@ -76,6 +76,7 @@ class StatusCommand extends Command
         $this->printConnectionState($output, $snapshot);
         $this->printSubmissionState($output, $snapshot);
         $this->printSignalStatus($output, $snapshot);
+        $this->printEnvironment($output, $snapshot);
         $this->printRecentOutcomes($output, $snapshot);
 
         return Command::SUCCESS;
@@ -146,6 +147,41 @@ class StatusCommand extends Command
                 ));
             }
         }
+    }
+
+    /**
+     * Prints the environment facts and EOL/update determination from the last successful sync.
+     *
+     * @param OutputInterface $output
+     * @param DiagnosticsSnapshot $snapshot
+     * @return void
+     */
+    private function printEnvironment(OutputInterface $output, DiagnosticsSnapshot $snapshot): void
+    {
+        $environment = $snapshot->environment;
+
+        if ($environment->syncedAt === null) {
+            $output->writeln('Environment: no data yet (run watchtower:sync).');
+
+            return;
+        }
+
+        $output->writeln(sprintf(
+            'Magento: %s %s%s',
+            $environment->magentoEdition ?? 'unknown edition',
+            $environment->magentoVersion ?? 'unknown version',
+            $environment->magentoEol?->isEol === true
+                ? sprintf(' <error>(EOL since %s)</error>', $environment->magentoEol->eolDate ?? 'unknown date')
+                : ''
+        ));
+
+        $output->writeln(sprintf(
+            'Connector: v%s%s',
+            $environment->connectorVersion ?? 'unknown',
+            $environment->connectorUpdate?->updateAvailable === true
+                ? sprintf(' <comment>(v%s available)</comment>', $environment->connectorUpdate->latestVersion ?? '?')
+                : ''
+        ));
     }
 
     /**

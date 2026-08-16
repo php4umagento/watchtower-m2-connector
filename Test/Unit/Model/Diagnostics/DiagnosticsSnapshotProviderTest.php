@@ -15,6 +15,8 @@ use Watchtower\Connector\Model\Api\PingService;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
+use Watchtower\Connector\Model\Environment\EnvironmentState;
+use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\CronHealth\Evaluator as CronHealthEvaluator;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
@@ -274,6 +276,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
         ?StoreManagerInterface $storeManager = null,
         ?SubmissionOutcomeRepository $submissionOutcomeRepository = null,
+        ?EnvironmentStateRepository $environmentStateRepository = null,
     ): DiagnosticsSnapshotProvider {
         if ($config === null) {
             $config = $this->createStub(Config::class);
@@ -331,6 +334,18 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             $submissionOutcomeRepository->method('recent')->willReturn([]);
         }
 
+        if ($environmentStateRepository === null) {
+            $environmentStateRepository = $this->createStub(EnvironmentStateRepository::class);
+            $environmentStateRepository->method('get')->willReturn(new EnvironmentState(
+                magentoVersion: null,
+                magentoEdition: null,
+                connectorVersion: null,
+                magentoEol: null,
+                connectorUpdate: null,
+                syncedAt: null,
+            ));
+        }
+
         return new DiagnosticsSnapshotProvider(
             $config,
             $pingService,
@@ -342,6 +357,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             $integrationHealthConfigRepository,
             new LiveStoreViewResolver($storeManager),
             $submissionOutcomeRepository,
+            $environmentStateRepository,
         );
     }
 
