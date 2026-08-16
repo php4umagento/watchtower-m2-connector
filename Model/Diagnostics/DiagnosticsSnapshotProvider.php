@@ -12,6 +12,7 @@ use Watchtower\Connector\Model\Api\PingService;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\CronHealth\Evaluator as CronHealthEvaluator;
+use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
 use Watchtower\Connector\Model\HealthState\HealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
@@ -47,6 +48,7 @@ class DiagnosticsSnapshotProvider
      * @param IntegrationHealthConfigRepository $integrationHealthConfigRepository
      * @param LiveStoreViewResolver $liveStoreViewResolver
      * @param SubmissionOutcomeRepository $submissionOutcomeRepository
+     * @param EnvironmentStateRepository $environmentStateRepository
      */
     public function __construct(
         private readonly Config $config,
@@ -59,6 +61,7 @@ class DiagnosticsSnapshotProvider
         private readonly IntegrationHealthConfigRepository $integrationHealthConfigRepository,
         private readonly LiveStoreViewResolver $liveStoreViewResolver,
         private readonly SubmissionOutcomeRepository $submissionOutcomeRepository,
+        private readonly EnvironmentStateRepository $environmentStateRepository,
     ) {
     }
 
@@ -87,6 +90,11 @@ class DiagnosticsSnapshotProvider
                 cronHealth: new SignalSnapshot(CronHealthEvaluator::EVENT_TYPE, null, 0),
                 storeViews: [],
                 recentSubmissionOutcomes: [],
+                // A pure local read of the last sync's cached result, if any --
+                // unaffected by the config just having been cleared, so a
+                // previously-known EOL/update finding does not disappear the
+                // moment isConfigured() goes false.
+                environment: $this->environmentStateRepository->get(),
             );
         }
 
@@ -110,6 +118,7 @@ class DiagnosticsSnapshotProvider
             cronHealth: $cronHealth,
             storeViews: $this->storeViewSnapshots(),
             recentSubmissionOutcomes: $this->submissionOutcomeRepository->recent($recentOutcomeLimit),
+            environment: $this->environmentStateRepository->get(),
         );
     }
 

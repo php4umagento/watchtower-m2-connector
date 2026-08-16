@@ -18,6 +18,9 @@ use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\Response;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Api\StoreViewSyncService;
+use Watchtower\Connector\Model\Environment\ConnectorVersionReader;
+use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
+use Watchtower\Connector\Model\Environment\MagentoVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionState;
@@ -37,6 +40,10 @@ class LeakTest extends TestCase
     use StoreStubTrait;
 
     private const ALLOWED_SYNC_PAYLOAD_KEYS = ['code', 'name', 'url', 'website_name', 'store_name', 'store_view_id'];
+
+    private const ALLOWED_TOP_LEVEL_SYNC_PAYLOAD_KEYS = [
+        'store_views', 'magento_version', 'magento_edition', 'connector_version',
+    ];
 
     public function testSyncPayloadContainsOnlyTheDocumentedIdentityFields(): void
     {
@@ -64,12 +71,20 @@ class LeakTest extends TestCase
             new LiveStoreViewResolver($storeManager),
             $client,
             $this->noOpOrganizationStateRepository(),
+            $this->magentoVersionReaderStub(),
+            $this->connectorVersionReaderStub(),
+            $this->createStub(EnvironmentStateRepository::class),
             $this->createStub(LoggerInterface::class)
         );
         $service->sync('https://watchtower.test', 'secret-api-key-value');
 
         self::assertIsArray($capturedPayload);
-        self::assertArrayHasKey('store_views', $capturedPayload);
+        self::assertSame(
+            self::ALLOWED_TOP_LEVEL_SYNC_PAYLOAD_KEYS,
+            array_keys($capturedPayload),
+            'The top-level sync payload must contain exactly these fields -- '
+            . 'no additional field may be added without an explicit leak review.'
+        );
         self::assertCount(1, $capturedPayload['store_views']);
 
         $entry = $capturedPayload['store_views'][0];
@@ -122,6 +137,9 @@ class LeakTest extends TestCase
             new LiveStoreViewResolver($storeManager),
             $client,
             $this->noOpOrganizationStateRepository(),
+            $this->magentoVersionReaderStub(),
+            $this->connectorVersionReaderStub(),
+            $this->createStub(EnvironmentStateRepository::class),
             $this->createStub(LoggerInterface::class)
         );
         $service->sync('https://watchtower.test', $apiKey);
@@ -420,5 +438,22 @@ class LeakTest extends TestCase
         $repository->method('isPaused')->willReturn(false);
 
         return $repository;
+    }
+
+    private function magentoVersionReaderStub(): MagentoVersionReader
+    {
+        $reader = $this->createStub(MagentoVersionReader::class);
+        $reader->method('version')->willReturn('2.4.9');
+        $reader->method('edition')->willReturn('Community');
+
+        return $reader;
+    }
+
+    private function connectorVersionReaderStub(): ConnectorVersionReader
+    {
+        $reader = $this->createStub(ConnectorVersionReader::class);
+        $reader->method('version')->willReturn('1.1.0');
+
+        return $reader;
     }
 }

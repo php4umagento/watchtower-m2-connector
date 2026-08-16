@@ -91,6 +91,20 @@ class SyncCommand extends Command
             ));
         }
 
+        if ($result->magentoEol?->isEol === true) {
+            $output->writeln(sprintf(
+                '<error>This Magento version reached end of life on %s.</error>',
+                $result->magentoEol->eolDate ?? 'an unknown date'
+            ));
+        }
+
+        if ($result->connectorUpdate?->updateAvailable === true) {
+            $output->writeln(sprintf(
+                '<comment>A newer Watchtower Connector version is available: v%s.</comment>',
+                $result->connectorUpdate->latestVersion ?? '?'
+            ));
+        }
+
         return Command::SUCCESS;
     }
 }

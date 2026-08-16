@@ -13,11 +13,14 @@ use Symfony\Component\Console\Tester\CommandTester;
 use Watchtower\Connector\Console\Command\StatusCommand;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Config;
+use Watchtower\Connector\Model\Api\ConnectorUpdateInfo;
+use Watchtower\Connector\Model\Api\MagentoEolInfo;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
 use Watchtower\Connector\Model\Diagnostics\SignalSnapshot;
 use Watchtower\Connector\Model\Diagnostics\StoreViewSnapshot;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
+use Watchtower\Connector\Model\Environment\EnvironmentState;
 
 /**
  * Delegates all data assembly to DiagnosticsSnapshotProvider (shared with
@@ -57,6 +60,7 @@ class StatusCommandTest extends TestCase
             cronHealth: new SignalSnapshot('cron_health', null, 1),
             storeViews: [],
             recentSubmissionOutcomes: [],
+            environment: $this->emptyEnvironmentState(),
         );
 
         $tester = new CommandTester($this->command(snapshot: $snapshot));
@@ -89,6 +93,7 @@ class StatusCommandTest extends TestCase
                 ]),
             ],
             recentSubmissionOutcomes: [],
+            environment: $this->emptyEnvironmentState(),
         );
 
         $tester = new CommandTester($this->command(snapshot: $snapshot));
@@ -145,6 +150,7 @@ class StatusCommandTest extends TestCase
                     occurredAt: new \DateTimeImmutable('2026-08-14T09:00:00+00:00'),
                 ),
             ],
+            environment: $this->emptyEnvironmentState(),
         );
 
         $tester = new CommandTester($this->command(snapshot: $snapshot));
@@ -160,6 +166,59 @@ class StatusCommandTest extends TestCase
         self::assertStringContainsString(
             '2026-08-14T09:00:00+00:00: failed, accepted=0, rejected=0 -- Connection refused',
             $display
+        );
+    }
+
+    public function testPrintsNoDataYetWhenNeverSynced(): void
+    {
+        $tester = new CommandTester($this->command());
+        $tester->execute([]);
+
+        self::assertStringContainsString('Environment: no data yet (run watchtower:sync).', $tester->getDisplay());
+    }
+
+    public function testPrintsMagentoEolWarningAndConnectorUpdateNotice(): void
+    {
+        $snapshot = new DiagnosticsSnapshot(
+            reachable: true,
+            unreachableError: null,
+            keyValid: true,
+            organizationPaused: false,
+            lastSuccessfulSubmissionAt: null,
+            bufferedReportCount: 0,
+            droppedEventCountLast24Hours: 0,
+            cronHealth: new SignalSnapshot('cron_health', null, 1),
+            storeViews: [],
+            recentSubmissionOutcomes: [],
+            environment: new EnvironmentState(
+                magentoVersion: '2.4.6-p5',
+                magentoEdition: 'Community',
+                connectorVersion: '1.0.1',
+                magentoEol: new MagentoEolInfo(isEol: true, eolDate: '2025-06-11', statusLabel: 'eol'),
+                connectorUpdate: new ConnectorUpdateInfo(updateAvailable: true, latestVersion: '1.1.0'),
+                syncedAt: new \DateTimeImmutable('2026-08-14T10:00:00+00:00'),
+            ),
+        );
+
+        $tester = new CommandTester($this->command(snapshot: $snapshot));
+        $tester->execute([]);
+
+        $display = $tester->getDisplay();
+        self::assertStringContainsString('Magento: Community 2.4.6-p5', $display);
+        self::assertStringContainsString('EOL since 2025-06-11', $display);
+        self::assertStringContainsString('Connector: v1.0.1', $display);
+        self::assertStringContainsString('v1.1.0 available', $display);
+    }
+
+    private function emptyEnvironmentState(): EnvironmentState
+    {
+        return new EnvironmentState(
+            magentoVersion: null,
+            magentoEdition: null,
+            connectorVersion: null,
+            magentoEol: null,
+            connectorUpdate: null,
+            syncedAt: null,
         );
     }
 
@@ -182,6 +241,7 @@ class StatusCommandTest extends TestCase
                 cronHealth: new SignalSnapshot('cron_health', null, 1),
                 storeViews: [],
                 recentSubmissionOutcomes: [],
+                environment: $this->emptyEnvironmentState(),
             );
         }
 

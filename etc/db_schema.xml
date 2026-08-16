@@ -252,4 +252,27 @@
             <column name="store_view_id"/>
         </constraint>
     </table>
+    <table name="watchtower_environment_state" resource="default" engine="innodb"
+           comment="Environment facts and the platform's EOL/update determination from the last sync, singleton row.">
+        <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
+        <column xsi:type="varchar" name="magento_version" nullable="true" length="32"
+                comment="This install's Magento version as of the last sync, e.g. 2.4.9"/>
+        <column xsi:type="varchar" name="magento_edition" nullable="true" length="32"
+                comment="This install's Magento edition as of the last sync, e.g. Community"/>
+        <column xsi:type="varchar" name="connector_version" nullable="true" length="32"
+                comment="This connector's own installed version as of the last sync"/>
+        <column xsi:type="boolean" name="magento_is_eol" nullable="true"
+                comment="Platform's EOL determination for magento_version/magento_edition; null means undetermined"/>
+        <column xsi:type="date" name="magento_eol_date" nullable="true" comment="Platform-supplied EOL date"/>
+        <column xsi:type="varchar" name="magento_status_label" nullable="true" length="32"
+                comment="Platform-supplied status label, e.g. supported"/>
+        <column xsi:type="boolean" name="connector_update_available" nullable="true"
+                comment="Whether a newer connector release exists per the platform; null means undetermined"/>
+        <column xsi:type="varchar" name="connector_latest_version" nullable="true" length="32"
+                comment="Latest connector version known to the platform"/>
+        <column xsi:type="timestamp" name="synced_at" nullable="true" comment="When this state was last refreshed"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="id"/>
+        </constraint>
+    </table>
 </schema>

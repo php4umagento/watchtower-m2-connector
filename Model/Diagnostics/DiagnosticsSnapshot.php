@@ -8,6 +8,8 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Model\Diagnostics;
 
+use Watchtower\Connector\Model\Environment\EnvironmentState;
+
 /**
  * A full diagnostics reading, assembled by DiagnosticsSnapshotProvider and
  * rendered by both the watchtower:status command and the admin diagnostics page.
@@ -25,6 +27,8 @@ class DiagnosticsSnapshot
      * @param SignalSnapshot $cronHealth
      * @param StoreViewSnapshot[] $storeViews
      * @param SubmissionOutcome[] $recentSubmissionOutcomes newest first
+     * @param EnvironmentState $environment last-known Magento/connector version and EOL/update
+     *     status, from the last successful sync -- never re-fetched just to render this snapshot
      */
     public function __construct(
         public readonly bool $reachable,
@@ -37,6 +41,7 @@ class DiagnosticsSnapshot
         public readonly SignalSnapshot $cronHealth,
         public readonly array $storeViews,
         public readonly array $recentSubmissionOutcomes,
+        public readonly EnvironmentState $environment,
     ) {
     }
 }
