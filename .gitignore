@@ -4,3 +4,9 @@
 # already cleaned up once); excluded here rather than deleted, since it may
 # be a still-active session's own state.
 /.omc/
+
+# Local dev-workflow notes for Claude Code. This repo ships publicly; the
+# private watchtower-saas repo paths, internal Docker/Warden setup, and
+# release-process details in here are not meant to go out with it. Keep
+# local-only -- never commit.
+/CLAUDE.md
