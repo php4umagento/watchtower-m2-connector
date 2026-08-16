@@ -98,13 +98,6 @@ class SyncCommand extends Command
             ));
         }
 
-        if ($result->connectorUpdate?->updateAvailable === true) {
-            $output->writeln(sprintf(
-                '<comment>A newer Watchtower Connector version is available: v%s.</comment>',
-                $result->connectorUpdate->latestVersion ?? '?'
-            ));
-        }
-
         return Command::SUCCESS;
     }
 }

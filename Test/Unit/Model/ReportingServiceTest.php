@@ -11,6 +11,8 @@ namespace Watchtower\Connector\Test\Unit\Model;
 use Magento\Store\Model\StoreManagerInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Watchtower\Connector\Model\Api\ConnectorVersionCheckResult;
+use Watchtower\Connector\Model\Api\ConnectorVersionCheckService;
 use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
 use Watchtower\Connector\Model\Api\MetricsSubmissionService;
@@ -21,6 +23,8 @@ use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
+use Watchtower\Connector\Model\Environment\ConnectorVersionState;
+use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
 use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
@@ -265,6 +269,190 @@ class ReportingServiceTest extends TestCase
             organizationStateRepository: $organizationStateRepository,
             logger: $logger,
         )->run();
+    }
+
+    /**
+     * PRD FR25: a connector below the platform's minimum_version stops
+     * submitting entirely. It shares the paused branch's
+     * buffer-everything-but-never-attempt shape rather than skipping the
+     * cycle outright, so evaluation and sequence numbers keep advancing and
+     * the backlog is delivered intact once the module is upgraded.
+     */
+    public function testWhenBelowTheMinimumVersionTheFreshReportIsBufferedRatherThanSubmitted(): void
+    {
+        $config = $this->configuredAndEnabled();
+        $report = $this->report(sequenceNumber: 42);
+
+        $evaluator = $this->createStub(Evaluator::class);
+        $evaluator->method('evaluate')->willReturn($report);
+
+        $bufferRepository = $this->createMock(ReportBufferRepository::class);
+        $bufferRepository->method('discardExpired')->willReturn(0);
+        $bufferRepository->method('isDue')->willReturn(true);
+        $bufferRepository->expects(self::never())->method('allBuffered');
+        $bufferRepository->expects(self::once())->method('bufferReport')->with($report)->willReturn(0);
+
+        $submissionService = $this->createMock(MetricsSubmissionService::class);
+        $submissionService->expects(self::never())->method('submit');
+
+        $outcome = $this->service(
+            config: $config,
+            evaluator: $evaluator,
+            submissionService: $submissionService,
+            bufferRepository: $bufferRepository,
+            connectorVersionStateRepository: $this->connectorVersionStateRepositoryStub(belowMinimum: true),
+        )->run();
+
+        self::assertTrue($outcome['ran']);
+        self::assertNull($outcome['result']);
+        self::assertTrue($outcome['belowMinimumVersion']);
+        self::assertFalse($outcome['organizationPaused'], 'This is the version case, not the paused case.');
+    }
+
+    /**
+     * Self-disabled outranks paused in the logged reason: both stop
+     * submission, but only one of them is fixed by upgrading, so support
+     * reading the log needs the actionable reason rather than whichever
+     * gate happens to be checked first.
+     */
+    public function testTheBelowMinimumVersionSkipReasonOutranksThePausedOneInTheLog(): void
+    {
+        $config = $this->configuredAndEnabled();
+
+        $evaluator = $this->createStub(Evaluator::class);
+        $evaluator->method('evaluate')->willReturn($this->report(sequenceNumber: 43));
+
+        $bufferRepository = $this->createStub(ReportBufferRepository::class);
+        $bufferRepository->method('discardExpired')->willReturn(0);
+        $bufferRepository->method('isDue')->willReturn(true);
+
+        $organizationStateRepository = $this->createStub(OrganizationStateRepository::class);
+        $organizationStateRepository->method('isPaused')->willReturn(true);
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('debug')->with(
+            'Watchtower reporting cycle skipped submission.',
+            ['reason' => 'connector_below_minimum_version', 'freshReportCount' => 1]
+        );
+
+        $this->service(
+            config: $config,
+            evaluator: $evaluator,
+            bufferRepository: $bufferRepository,
+            organizationStateRepository: $organizationStateRepository,
+            logger: $logger,
+            connectorVersionStateRepository: $this->connectorVersionStateRepositoryStub(belowMinimum: true),
+        )->run();
+    }
+
+    /**
+     * FR24 ties the check to the report cycle and deliberately does not gate
+     * it on organization_paused: a paused install that is also below the
+     * minimum still has to learn it must upgrade, and a self-disabled one
+     * has to keep checking so it recovers on its own once upgraded.
+     */
+    public function testTheVersionCheckRunsAndIsPersistedEvenWhileTheOrganizationIsPaused(): void
+    {
+        $config = $this->configuredAndEnabled();
+
+        $evaluator = $this->createStub(Evaluator::class);
+        $evaluator->method('evaluate')->willReturn($this->report(sequenceNumber: 44));
+
+        $bufferRepository = $this->createStub(ReportBufferRepository::class);
+        $bufferRepository->method('discardExpired')->willReturn(0);
+        $bufferRepository->method('isDue')->willReturn(true);
+
+        $organizationStateRepository = $this->createStub(OrganizationStateRepository::class);
+        $organizationStateRepository->method('isPaused')->willReturn(true);
+
+        $connectorVersionCheckService = $this->createMock(ConnectorVersionCheckService::class);
+        $connectorVersionCheckService->expects(self::once())->method('check')
+            ->with('https://watchtower.test', 'secret-api-key-value')
+            ->willReturn(new ConnectorVersionCheckResult(
+                succeeded: true,
+                installedVersion: '1.0.0',
+                minimumVersion: '1.2.0',
+                latestVersion: '1.3.0',
+                belowMinimum: true,
+                updateAvailable: true,
+            ));
+
+        $connectorVersionStateRepository = $this->createMock(ConnectorVersionStateRepository::class);
+        $connectorVersionStateRepository->expects(self::once())->method('save')->with(
+            '1.0.0',
+            '1.2.0',
+            '1.3.0',
+            true,
+            true,
+            self::isInstanceOf(\DateTimeImmutable::class)
+        );
+        $connectorVersionStateRepository->method('get')->willReturn(new ConnectorVersionState(
+            installedVersion: '1.0.0',
+            minimumVersion: '1.2.0',
+            latestVersion: '1.3.0',
+            belowMinimum: true,
+            updateAvailable: true,
+            checkedAt: new \DateTimeImmutable('2026-08-13T15:00:00+00:00'),
+        ));
+
+        $this->service(
+            config: $config,
+            evaluator: $evaluator,
+            bufferRepository: $bufferRepository,
+            organizationStateRepository: $organizationStateRepository,
+            connectorVersionCheckService: $connectorVersionCheckService,
+            connectorVersionStateRepository: $connectorVersionStateRepository,
+        )->run();
+    }
+
+    /**
+     * A failed check (network error, non-200) carries no verdict at all, so
+     * it must leave the persisted state alone: overwriting it would either
+     * silently un-disable a connector the platform has disowned, or -- worse
+     * -- self-disable a healthy one every time the platform is briefly
+     * unreachable.
+     */
+    public function testAFailedVersionCheckNeverOverwritesThePersistedState(): void
+    {
+        $config = $this->configuredAndEnabled();
+
+        $evaluator = $this->createStub(Evaluator::class);
+        $evaluator->method('evaluate')->willReturn($this->report(sequenceNumber: 45));
+
+        $bufferRepository = $this->createStub(ReportBufferRepository::class);
+        $bufferRepository->method('discardExpired')->willReturn(0);
+        $bufferRepository->method('isDue')->willReturn(true);
+
+        $connectorVersionCheckService = $this->createStub(ConnectorVersionCheckService::class);
+        $connectorVersionCheckService->method('check')->willReturn(new ConnectorVersionCheckResult(
+            succeeded: false,
+            installedVersion: '1.0.0',
+            errorMessage: 'Connection refused',
+        ));
+
+        $connectorVersionStateRepository = $this->createMock(ConnectorVersionStateRepository::class);
+        $connectorVersionStateRepository->expects(self::never())->method('save');
+        $connectorVersionStateRepository->method('get')->willReturn(new ConnectorVersionState(
+            installedVersion: '1.0.0',
+            minimumVersion: '1.2.0',
+            latestVersion: '1.2.0',
+            belowMinimum: true,
+            updateAvailable: true,
+            checkedAt: new \DateTimeImmutable('2026-08-13T09:00:00+00:00'),
+        ));
+
+        $outcome = $this->service(
+            config: $config,
+            evaluator: $evaluator,
+            bufferRepository: $bufferRepository,
+            connectorVersionCheckService: $connectorVersionCheckService,
+            connectorVersionStateRepository: $connectorVersionStateRepository,
+        )->run();
+
+        self::assertTrue(
+            $outcome['belowMinimumVersion'],
+            'The last successful verdict still stands; a failed check is not a recovery.'
+        );
     }
 
     public function testDueWithBufferedReportsSubmitsThemAllTogetherWithTheFreshReportAndClearsOnSuccess(): void
@@ -1304,6 +1492,8 @@ class ReportingServiceTest extends TestCase
      * @param ConventionEventReader|null $conventionEventReader
      * @param OrganizationStateRepository|null $organizationStateRepository
      * @param SubmissionOutcomeRepository|null $submissionOutcomeRepository
+     * @param ConnectorVersionCheckService|null $connectorVersionCheckService
+     * @param ConnectorVersionStateRepository|null $connectorVersionStateRepository
      * @return ReportingService
      */
     private function service(
@@ -1325,6 +1515,8 @@ class ReportingServiceTest extends TestCase
         ?OrganizationStateRepository $organizationStateRepository = null,
         ?LoggerInterface $logger = null,
         ?SubmissionOutcomeRepository $submissionOutcomeRepository = null,
+        ?ConnectorVersionCheckService $connectorVersionCheckService = null,
+        ?ConnectorVersionStateRepository $connectorVersionStateRepository = null,
     ): ReportingService {
         if ($storeManager === null) {
             $storeManager = $this->createStub(StoreManagerInterface::class);
@@ -1339,6 +1531,15 @@ class ReportingServiceTest extends TestCase
         if ($organizationStateRepository === null) {
             $organizationStateRepository = $this->createStub(OrganizationStateRepository::class);
             $organizationStateRepository->method('isPaused')->willReturn(false);
+        }
+
+        if ($connectorVersionCheckService === null) {
+            $connectorVersionCheckService = $this->createStub(ConnectorVersionCheckService::class);
+            $connectorVersionCheckService->method('check')->willReturn($this->upToDateCheckResult());
+        }
+
+        if ($connectorVersionStateRepository === null) {
+            $connectorVersionStateRepository = $this->connectorVersionStateRepositoryStub();
         }
 
         return new ReportingService(
@@ -1360,7 +1561,35 @@ class ReportingServiceTest extends TestCase
             $organizationStateRepository,
             $logger ?? $this->createStub(LoggerInterface::class),
             $submissionOutcomeRepository ?? $this->createStub(SubmissionOutcomeRepository::class),
+            $connectorVersionCheckService,
+            $connectorVersionStateRepository,
         );
+    }
+
+    private function upToDateCheckResult(): ConnectorVersionCheckResult
+    {
+        return new ConnectorVersionCheckResult(
+            succeeded: true,
+            installedVersion: '1.2.0',
+            minimumVersion: '1.0.0',
+            latestVersion: '1.2.0',
+        );
+    }
+
+    private function connectorVersionStateRepositoryStub(
+        bool $belowMinimum = false
+    ): ConnectorVersionStateRepository {
+        $repository = $this->createStub(ConnectorVersionStateRepository::class);
+        $repository->method('get')->willReturn(new ConnectorVersionState(
+            installedVersion: $belowMinimum ? '1.0.0' : '1.2.0',
+            minimumVersion: $belowMinimum ? '1.2.0' : '1.0.0',
+            latestVersion: '1.2.0',
+            belowMinimum: $belowMinimum,
+            updateAvailable: $belowMinimum,
+            checkedAt: new \DateTimeImmutable('2026-08-13T15:00:00+00:00'),
+        ));
+
+        return $repository;
     }
 
     private function integrationHealthReport(string $storeViewCode): MetricReport

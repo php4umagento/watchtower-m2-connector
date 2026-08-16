@@ -77,6 +77,7 @@ class StatusCommand extends Command
         $this->printSubmissionState($output, $snapshot);
         $this->printSignalStatus($output, $snapshot);
         $this->printEnvironment($output, $snapshot);
+        $this->printConnectorVersion($output, $snapshot);
         $this->printRecentOutcomes($output, $snapshot);
 
         return Command::SUCCESS;
@@ -150,7 +151,7 @@ class StatusCommand extends Command
     }
 
     /**
-     * Prints the environment facts and EOL/update determination from the last successful sync.
+     * Prints the environment facts and EOL determination from the last successful sync.
      *
      * @param OutputInterface $output
      * @param DiagnosticsSnapshot $snapshot
@@ -175,13 +176,42 @@ class StatusCommand extends Command
                 : ''
         ));
 
+        $output->writeln(sprintf('Connector: v%s', $environment->connectorVersion ?? 'unknown'));
+    }
+
+    /**
+     * Prints the last successful connector-version check outcome (PRD FR24-FR27).
+     *
+     * Covers the installed/minimum/latest version and whether reporting is currently self-disabled.
+     *
+     * @param OutputInterface $output
+     * @param DiagnosticsSnapshot $snapshot
+     * @return void
+     */
+    private function printConnectorVersion(OutputInterface $output, DiagnosticsSnapshot $snapshot): void
+    {
+        $versionState = $snapshot->connectorVersion;
+
+        if ($versionState->checkedAt === null) {
+            $output->writeln('Connector version check: no data yet.');
+
+            return;
+        }
+
         $output->writeln(sprintf(
-            'Connector: v%s%s',
-            $environment->connectorVersion ?? 'unknown',
-            $environment->connectorUpdate?->updateAvailable === true
-                ? sprintf(' <comment>(v%s available)</comment>', $environment->connectorUpdate->latestVersion ?? '?')
-                : ''
+            'Connector version check: installed=%s, minimum=%s, latest=%s',
+            $versionState->installedVersion ?? 'unknown',
+            $versionState->minimumVersion ?? 'unknown',
+            $versionState->latestVersion ?? 'unknown'
         ));
+
+        if ($versionState->belowMinimum) {
+            $output->writeln(
+                '<error>Reporting is self-disabled: installed version is below the minimum supported version.</error>'
+            );
+        } elseif ($versionState->updateAvailable) {
+            $output->writeln('<comment>An update is available.</comment>');
+        }
     }
 
     /**

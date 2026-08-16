@@ -12,7 +12,6 @@ use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\DB\Select;
 use PHPUnit\Framework\TestCase;
-use Watchtower\Connector\Model\Api\ConnectorUpdateInfo;
 use Watchtower\Connector\Model\Api\MagentoEolInfo;
 use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 
@@ -33,7 +32,6 @@ class EnvironmentStateRepositoryTest extends TestCase
         self::assertNull($state->magentoEdition);
         self::assertNull($state->connectorVersion);
         self::assertNull($state->magentoEol);
-        self::assertNull($state->connectorUpdate);
         self::assertNull($state->syncedAt);
     }
 
@@ -46,8 +44,6 @@ class EnvironmentStateRepositoryTest extends TestCase
             'magento_is_eol' => '0',
             'magento_eol_date' => '2027-04-09',
             'magento_status_label' => 'supported',
-            'connector_update_available' => '1',
-            'connector_latest_version' => '1.1.0',
             'synced_at' => '2026-08-14 10:00:00',
         ]);
 
@@ -60,20 +56,16 @@ class EnvironmentStateRepositoryTest extends TestCase
         self::assertFalse($state->magentoEol->isEol);
         self::assertSame('2027-04-09', $state->magentoEol->eolDate);
         self::assertSame('supported', $state->magentoEol->statusLabel);
-        self::assertNotNull($state->connectorUpdate);
-        self::assertTrue($state->connectorUpdate->updateAvailable);
-        self::assertSame('1.1.0', $state->connectorUpdate->latestVersion);
         self::assertSame('2026-08-14T10:00:00+00:00', $state->syncedAt?->format(\DateTimeInterface::ATOM));
     }
 
     /**
-     * A null magento_is_eol/connector_update_available column (the platform
-     * couldn't determine either on the last sync) must map to a null
-     * MagentoEolInfo/ConnectorUpdateInfo object, not one with a false-y
-     * isEol/updateAvailable -- callers need to tell "known not EOL" apart
-     * from "undetermined".
+     * A null magento_is_eol column (the platform couldn't determine EOL
+     * status on the last sync) must map to a null MagentoEolInfo object,
+     * not one with a false-y isEol -- callers need to tell "known not EOL"
+     * apart from "undetermined".
      */
-    public function testUndeterminedEolAndUpdateColumnsMapToNullObjectsNotFalseyOnes(): void
+    public function testAnUndeterminedEolColumnMapsToANullObjectNotAFalseyOne(): void
     {
         $repository = $this->repositoryReturning(fetchRowResult: [
             'magento_version' => '2.4.7-p5',
@@ -82,15 +74,12 @@ class EnvironmentStateRepositoryTest extends TestCase
             'magento_is_eol' => null,
             'magento_eol_date' => null,
             'magento_status_label' => null,
-            'connector_update_available' => null,
-            'connector_latest_version' => null,
             'synced_at' => '2026-08-14 10:00:00',
         ]);
 
         $state = $repository->get();
 
         self::assertNull($state->magentoEol);
-        self::assertNull($state->connectorUpdate);
     }
 
     public function testSavePersistsEveryFieldThroughInsertOnDuplicate(): void
@@ -116,7 +105,6 @@ class EnvironmentStateRepositoryTest extends TestCase
             'Community',
             '1.1.0',
             new MagentoEolInfo(isEol: false, eolDate: '2027-04-09', statusLabel: 'supported'),
-            new ConnectorUpdateInfo(updateAvailable: false, latestVersion: '1.1.0'),
             new \DateTimeImmutable('2026-08-14T10:00:00+00:00'),
         );
 
@@ -126,11 +114,11 @@ class EnvironmentStateRepositoryTest extends TestCase
         self::assertSame('1.1.0', $savedRow['connector_version']);
         self::assertSame(0, $savedRow['magento_is_eol']);
         self::assertSame('2027-04-09', $savedRow['magento_eol_date']);
-        self::assertSame(0, $savedRow['connector_update_available']);
+        self::assertSame('supported', $savedRow['magento_status_label']);
         self::assertSame('2026-08-14 10:00:00', $savedRow['synced_at']);
     }
 
-    public function testSavePersistsNullEolAndUpdateInfoAsNullColumnsNotFalse(): void
+    public function testSavePersistsNullEolInfoAsNullColumnsNotFalse(): void
     {
         $savedRow = null;
 
@@ -148,10 +136,11 @@ class EnvironmentStateRepositoryTest extends TestCase
         $resourceConnection->method('getTableName')->willReturn('watchtower_environment_state');
 
         $repository = new EnvironmentStateRepository($resourceConnection);
-        $repository->save(null, null, null, null, null, new \DateTimeImmutable('2026-08-14T10:00:00+00:00'));
+        $repository->save(null, null, null, null, new \DateTimeImmutable('2026-08-14T10:00:00+00:00'));
 
         self::assertNull($savedRow['magento_is_eol']);
-        self::assertNull($savedRow['connector_update_available']);
+        self::assertNull($savedRow['magento_eol_date']);
+        self::assertNull($savedRow['magento_status_label']);
     }
 
     private function repositoryReturning(array|false $fetchRowResult): EnvironmentStateRepository

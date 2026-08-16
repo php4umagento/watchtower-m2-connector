@@ -19,6 +19,8 @@ use Watchtower\Connector\Model\Api\Response;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Api\StoreViewSyncService;
 use Watchtower\Connector\Model\Environment\ConnectorVersionReader;
+use Watchtower\Connector\Model\Environment\ConnectorVersionState;
+use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\Environment\MagentoVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
@@ -74,6 +76,7 @@ class LeakTest extends TestCase
             $this->magentoVersionReaderStub(),
             $this->connectorVersionReaderStub(),
             $this->createStub(EnvironmentStateRepository::class),
+            $this->connectorVersionStateRepositoryStub(),
             $this->createStub(LoggerInterface::class)
         );
         $service->sync('https://watchtower.test', 'secret-api-key-value');
@@ -140,6 +143,7 @@ class LeakTest extends TestCase
             $this->magentoVersionReaderStub(),
             $this->connectorVersionReaderStub(),
             $this->createStub(EnvironmentStateRepository::class),
+            $this->connectorVersionStateRepositoryStub(),
             $this->createStub(LoggerInterface::class)
         );
         $service->sync('https://watchtower.test', $apiKey);
@@ -447,6 +451,21 @@ class LeakTest extends TestCase
         $reader->method('edition')->willReturn('Community');
 
         return $reader;
+    }
+
+    private function connectorVersionStateRepositoryStub(): ConnectorVersionStateRepository
+    {
+        $repository = $this->createStub(ConnectorVersionStateRepository::class);
+        $repository->method('get')->willReturn(new ConnectorVersionState(
+            installedVersion: '1.1.0',
+            minimumVersion: '1.0.0',
+            latestVersion: '1.1.0',
+            belowMinimum: false,
+            updateAvailable: false,
+            checkedAt: new \DateTimeImmutable('2026-08-14T10:00:00+00:00'),
+        ));
+
+        return $repository;
     }
 
     private function connectorVersionReaderStub(): ConnectorVersionReader

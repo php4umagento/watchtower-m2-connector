@@ -11,6 +11,7 @@ namespace Watchtower\Connector\Model\Api;
 use Magento\Store\Api\Data\StoreInterface;
 use Psr\Log\LoggerInterface;
 use Watchtower\Connector\Model\Environment\ConnectorVersionReader;
+use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\Environment\MagentoVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
@@ -34,6 +35,7 @@ class StoreViewSyncService
      * @param MagentoVersionReader $magentoVersionReader
      * @param ConnectorVersionReader $connectorVersionReader
      * @param EnvironmentStateRepository $environmentStateRepository
+     * @param ConnectorVersionStateRepository $connectorVersionStateRepository
      * @param LoggerInterface $logger
      */
     public function __construct(
@@ -43,6 +45,7 @@ class StoreViewSyncService
         private readonly MagentoVersionReader $magentoVersionReader,
         private readonly ConnectorVersionReader $connectorVersionReader,
         private readonly EnvironmentStateRepository $environmentStateRepository,
+        private readonly ConnectorVersionStateRepository $connectorVersionStateRepository,
         private readonly LoggerInterface $logger
     ) {
     }
@@ -61,6 +64,17 @@ class StoreViewSyncService
         // thing stopping a paused organization from syncing.
         if ($this->organizationStateRepository->isPaused(new \DateTimeImmutable())) {
             return new SyncResult(succeeded: false, errorMessage: 'Organization is paused; not syncing store views.');
+        }
+
+        // PRD FR25: below minimum_version stops sync too, not just metrics.
+        // Reads the state ReportingService's own cycle last persisted --
+        // this method never makes its own connector-version call, since
+        // FR24 ties that check to the report cycle's cadence, not sync's.
+        if ($this->connectorVersionStateRepository->get()->belowMinimum) {
+            return new SyncResult(
+                succeeded: false,
+                errorMessage: 'Connector version is below the minimum supported version; not syncing store views.',
+            );
         }
 
         // StoreManagerInterface::getStores() only excludes the admin store
@@ -117,7 +131,6 @@ class StoreViewSyncService
         ]);
 
         $magentoEol = $this->parseMagentoEol($body['magento_eol'] ?? null);
-        $connectorUpdate = $this->parseConnectorUpdate($body['connector_update'] ?? null);
 
         // Cached locally so watchtower:status and the Diagnostics admin page
         // can show it without a live round trip of their own -- only a real
@@ -127,7 +140,6 @@ class StoreViewSyncService
             $payload['magento_edition'],
             $payload['connector_version'],
             $magentoEol,
-            $connectorUpdate,
             new \DateTimeImmutable(),
         );
 
@@ -137,7 +149,6 @@ class StoreViewSyncService
             created: $created,
             rejected: $rejected,
             magentoEol: $magentoEol,
-            connectorUpdate: $connectorUpdate,
         );
     }
 
@@ -158,25 +169,6 @@ class StoreViewSyncService
             isEol: (bool) ($raw['is_eol'] ?? false),
             eolDate: $raw['eol_date'] ?? null,
             statusLabel: $raw['status_label'] ?? null,
-        );
-    }
-
-    /**
-     * Parses the response's 'connector_update' value into a typed DTO.
-     *
-     * @param mixed $raw the decoded 'connector_update' response value, expected to be an
-     *     array{update_available: bool, latest_version: string|null} or null
-     * @return ConnectorUpdateInfo|null
-     */
-    private function parseConnectorUpdate(mixed $raw): ?ConnectorUpdateInfo
-    {
-        if (!is_array($raw)) {
-            return null;
-        }
-
-        return new ConnectorUpdateInfo(
-            updateAvailable: (bool) ($raw['update_available'] ?? false),
-            latestVersion: $raw['latest_version'] ?? null,
         );
     }
 

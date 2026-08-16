@@ -14,6 +14,8 @@ use Magento\Store\Model\StoreManagerInterface;
 use Magento\Store\Model\Website;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Watchtower\Connector\Model\Api\ConnectorVersionCheckResult;
+use Watchtower\Connector\Model\Api\ConnectorVersionCheckService;
 use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
 use Watchtower\Connector\Model\Api\MetricsSubmissionService;
@@ -23,6 +25,8 @@ use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
+use Watchtower\Connector\Model\Environment\ConnectorVersionState;
+use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
 use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
@@ -265,6 +269,8 @@ class ReportingCyclePerfTest extends TestCase
             $this->stubOrganizationStateRepository(),
             $this->createStub(LoggerInterface::class),
             $this->createStub(SubmissionOutcomeRepository::class),
+            $this->stubConnectorVersionCheckService(),
+            $this->stubConnectorVersionStateRepository(),
         );
     }
 
@@ -312,6 +318,34 @@ class ReportingCyclePerfTest extends TestCase
     {
         $repository = $this->createStub(OrganizationStateRepository::class);
         $repository->method('isPaused')->willReturn(false);
+
+        return $repository;
+    }
+
+    private function stubConnectorVersionCheckService(): ConnectorVersionCheckService
+    {
+        $service = $this->createStub(ConnectorVersionCheckService::class);
+        $service->method('check')->willReturn(new ConnectorVersionCheckResult(
+            succeeded: true,
+            installedVersion: '1.2.0',
+            minimumVersion: '1.0.0',
+            latestVersion: '1.2.0',
+        ));
+
+        return $service;
+    }
+
+    private function stubConnectorVersionStateRepository(): ConnectorVersionStateRepository
+    {
+        $repository = $this->createStub(ConnectorVersionStateRepository::class);
+        $repository->method('get')->willReturn(new ConnectorVersionState(
+            installedVersion: '1.2.0',
+            minimumVersion: '1.0.0',
+            latestVersion: '1.2.0',
+            belowMinimum: false,
+            updateAvailable: false,
+            checkedAt: new \DateTimeImmutable('2026-08-14T09:00:00+00:00'),
+        ));
 
         return $repository;
     }

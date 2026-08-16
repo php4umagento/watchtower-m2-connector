@@ -7,6 +7,7 @@
 /** @var \Watchtower\Connector\Block\Adminhtml\Diagnostics\Overview $block */
 /** @var \Magento\Framework\Escaper $escaper */
 $snapshot = $block->getSnapshot();
+$versionState = $snapshot->connectorVersion;
 ?>
 <div id="watchtower_diagnostics">
     <div class="admin__fieldset-wrapper">
@@ -102,13 +103,57 @@ $snapshot = $block->getSnapshot();
                     <td class="data-grid-td"><?= $escaper->escapeHtml(__('Connector Version')) ?></td>
                     <td class="data-grid-td">
                         v<?= $escaper->escapeHtml((string) $snapshot->environment->connectorVersion) ?>
-                        <?php if ($snapshot->environment->connectorUpdate?->updateAvailable === true): ?>
-                            <strong class="watchtower-update-available">
-                                <?= $escaper->escapeHtml(__(
-                                    '(v%1 available)',
-                                    $snapshot->environment->connectorUpdate->latestVersion ?? '?'
-                                )) ?>
+                    </td>
+                </tr>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="admin__fieldset-wrapper">
+        <div class="admin__fieldset-wrapper-title">
+            <strong><?= $escaper->escapeHtml(__('Connector Version Check')) ?></strong>
+        </div>
+        <table class="data-grid">
+            <tbody>
+            <?php if ($versionState->checkedAt === null): ?>
+                <tr>
+                    <td class="data-grid-td" colspan="2">
+                        <?= $escaper->escapeHtml(__('No data yet.')) ?>
+                    </td>
+                </tr>
+            <?php else: ?>
+                <tr>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml(__('Installed Version')) ?></td>
+                    <td class="data-grid-td">
+                        <?= $escaper->escapeHtml((string) ($versionState->installedVersion ?? __('unknown'))) ?>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml(__('Minimum Version')) ?></td>
+                    <td class="data-grid-td">
+                        <?= $escaper->escapeHtml((string) ($versionState->minimumVersion ?? __('unknown'))) ?>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml(__('Latest Version')) ?></td>
+                    <td class="data-grid-td">
+                        <?= $escaper->escapeHtml((string) ($versionState->latestVersion ?? __('unknown'))) ?>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="data-grid-td"><?= $escaper->escapeHtml(__('Reporting Status')) ?></td>
+                    <td class="data-grid-td">
+                        <?php if ($versionState->belowMinimum): ?>
+                            <strong class="watchtower-eol-warning">
+                                <?= $escaper->escapeHtml(__('Self-disabled (below minimum supported version)')) ?>
                             </strong>
+                        <?php elseif ($versionState->updateAvailable): ?>
+                            <strong class="watchtower-update-available">
+                                <?= $escaper->escapeHtml(__('Active (update available)')) ?>
+                            </strong>
+                        <?php else: ?>
+                            <?= $escaper->escapeHtml(__('Active')) ?>
                         <?php endif; ?>
                     </td>
                 </tr>

@@ -9,12 +9,14 @@ declare(strict_types=1);
 namespace Watchtower\Connector\Model;
 
 use Psr\Log\LoggerInterface;
+use Watchtower\Connector\Model\Api\ConnectorVersionCheckService;
 use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
 use Watchtower\Connector\Model\Api\MetricsSubmissionService;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
+use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
 use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
@@ -78,6 +80,8 @@ class ReportingService
      * @param OrganizationStateRepository $organizationStateRepository
      * @param LoggerInterface $logger
      * @param SubmissionOutcomeRepository $submissionOutcomeRepository
+     * @param ConnectorVersionCheckService $connectorVersionCheckService
+     * @param ConnectorVersionStateRepository $connectorVersionStateRepository
      */
     public function __construct(
         private readonly Config $config,
@@ -98,6 +102,8 @@ class ReportingService
         private readonly OrganizationStateRepository $organizationStateRepository,
         private readonly LoggerInterface $logger,
         private readonly SubmissionOutcomeRepository $submissionOutcomeRepository,
+        private readonly ConnectorVersionCheckService $connectorVersionCheckService,
+        private readonly ConnectorVersionStateRepository $connectorVersionStateRepository,
     ) {
     }
 
@@ -116,6 +122,7 @@ class ReportingService
      *     evictedForCapacityCount?: int,
      *     skippedReason?: string,
      *     organizationPaused?: bool,
+     *     belowMinimumVersion?: bool,
      * }
      */
     public function run(): array
@@ -130,6 +137,27 @@ class ReportingService
 
         $now = new \DateTimeImmutable();
 
+        // PRD FR24: every real cycle, never gated on organization_paused or
+        // submission backoff -- a self-disabled connector must keep checking
+        // on its own so it recovers automatically once upgraded, the same
+        // reason ping() is never paused-gated. A failed check leaves the
+        // persisted state untouched; see ConnectorVersionStateRepository's
+        // own docblock for why that matters.
+        $versionCheck = $this->connectorVersionCheckService->check($this->config->baseUrl(), $this->config->apiKey());
+
+        if ($versionCheck->succeeded) {
+            $this->connectorVersionStateRepository->save(
+                $versionCheck->installedVersion,
+                $versionCheck->minimumVersion,
+                $versionCheck->latestVersion,
+                $versionCheck->belowMinimum,
+                $versionCheck->updateAvailable,
+                $now,
+            );
+        }
+
+        $belowMinimumVersion = $this->connectorVersionStateRepository->get()->belowMinimum;
+
         // cron_health must stay at index 0; callers read $outcome['report'] from there.
         $freshReports = [$this->cronHealthEvaluator->evaluate($now)];
         array_push($freshReports, ...$this->liveStoreViewReports($now));
@@ -138,12 +166,16 @@ class ReportingService
         $expiredCount = $this->reportBufferRepository->discardExpired($now);
 
         // Checked alongside isDue() rather than as a top-level skip, so evaluation
-        // still advances state and sequence numbers while paused.
+        // still advances state and sequence numbers while paused/below minimum.
         $organizationPaused = $this->organizationStateRepository->isPaused($now);
 
-        if (!$this->reportBufferRepository->isDue($now) || $organizationPaused) {
+        if (!$this->reportBufferRepository->isDue($now) || $organizationPaused || $belowMinimumVersion) {
             $this->logger->debug('Watchtower reporting cycle skipped submission.', [
-                'reason' => $organizationPaused ? 'organization_paused' : 'backoff',
+                'reason' => match (true) {
+                    $belowMinimumVersion => 'connector_below_minimum_version',
+                    $organizationPaused => 'organization_paused',
+                    default => 'backoff',
+                },
                 'freshReportCount' => count($freshReports),
             ]);
 
@@ -158,6 +190,7 @@ class ReportingService
                 'expiredBufferedCount' => $expiredCount,
                 'evictedForCapacityCount' => $evictedCount,
                 'organizationPaused' => $organizationPaused,
+                'belowMinimumVersion' => $belowMinimumVersion,
             ];
         }
 
@@ -237,6 +270,7 @@ class ReportingService
             'expiredBufferedCount' => $expiredCount,
             'evictedForCapacityCount' => $totalEvictedForCapacity,
             'organizationPaused' => false,
+            'belowMinimumVersion' => false,
         ];
     }
 
