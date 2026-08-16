@@ -169,7 +169,6 @@ $versionState = $snapshot->connectorVersion;
         <table class="data-grid">
             <thead>
             <tr>
-                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Store View')) ?></th>
                 <th class="data-grid-th"><?= $escaper->escapeHtml(__('Signal')) ?></th>
                 <th class="data-grid-th"><?= $escaper->escapeHtml(__('Status')) ?></th>
                 <th class="data-grid-th"><?= $escaper->escapeHtml(__('Sequence Number')) ?></th>
@@ -177,28 +176,60 @@ $versionState = $snapshot->connectorVersion;
             </thead>
             <tbody>
             <tr>
-                <td class="data-grid-td"><?= $escaper->escapeHtml(__('(install-wide)')) ?></td>
-                <td class="data-grid-td"><?= $escaper->escapeHtml($snapshot->cronHealth->category) ?></td>
+                <td class="data-grid-td">
+                    <?= $escaper->escapeHtml($snapshot->cronHealth->category) ?>
+                    (<?= $escaper->escapeHtml(__('install-wide')) ?>)
+                </td>
                 <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($snapshot->cronHealth)) ?></td>
                 <td class="data-grid-td">
                     <?= $escaper->escapeHtml((string) $snapshot->cronHealth->sequenceNumber) ?>
                 </td>
             </tr>
-            <?php foreach ($snapshot->storeViews as $storeView): ?>
-                <?php foreach ($storeView->signals as $signal): ?>
-                    <tr>
-                        <td class="data-grid-td">
-                            <?= $escaper->escapeHtml($storeView->storeViewCode) ?>
-                            (id=<?= $escaper->escapeHtml((string) $storeView->storeViewId) ?>)
-                        </td>
-                        <td class="data-grid-td"><?= $escaper->escapeHtml($signal->category) ?></td>
-                        <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($signal)) ?></td>
-                        <td class="data-grid-td"><?= $escaper->escapeHtml((string) $signal->sequenceNumber) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-            <?php endforeach; ?>
             </tbody>
         </table>
+
+        <?php // Collapsed by default, one <details> per store view -- keeps the
+        // page short for installs with many store views. Any store view with
+        // a non-NORMAL signal is expanded automatically so a real problem is
+        // never hidden behind an extra click. ?>
+        <?php foreach ($snapshot->storeViews as $storeView): ?>
+            <?php $needsAttention = $block->storeViewNeedsAttention($storeView); ?>
+            <details class="details admin__collapsible-block-wrapper"<?= $needsAttention ? ' open' : '' ?>>
+                <summary class="details-summary admin__collapsible-title">
+                    <span>
+                        <?= $escaper->escapeHtml($storeView->storeViewCode) ?>
+                        (id=<?= $escaper->escapeHtml((string) $storeView->storeViewId) ?>)
+                    </span>
+                    <?php if ($needsAttention): ?>
+                        <strong class="watchtower-eol-warning">
+                            <?= $escaper->escapeHtml(__('Needs attention')) ?>
+                        </strong>
+                    <?php endif; ?>
+                </summary>
+                <div class="details-content admin__fieldset">
+                    <table class="data-grid">
+                        <thead>
+                        <tr>
+                            <th class="data-grid-th"><?= $escaper->escapeHtml(__('Signal')) ?></th>
+                            <th class="data-grid-th"><?= $escaper->escapeHtml(__('Status')) ?></th>
+                            <th class="data-grid-th"><?= $escaper->escapeHtml(__('Sequence Number')) ?></th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <?php foreach ($storeView->signals as $signal): ?>
+                            <tr>
+                                <td class="data-grid-td"><?= $escaper->escapeHtml($signal->category) ?></td>
+                                <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($signal)) ?></td>
+                                <td class="data-grid-td">
+                                    <?= $escaper->escapeHtml((string) $signal->sequenceNumber) ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        <?php endforeach; ?>
     </div>
 
     <div class="admin__fieldset-wrapper">
