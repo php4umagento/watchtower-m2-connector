@@ -13,13 +13,13 @@ use Symfony\Component\Console\Tester\CommandTester;
 use Watchtower\Connector\Console\Command\StatusCommand;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Config;
-use Watchtower\Connector\Model\Api\ConnectorUpdateInfo;
 use Watchtower\Connector\Model\Api\MagentoEolInfo;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
 use Watchtower\Connector\Model\Diagnostics\SignalSnapshot;
 use Watchtower\Connector\Model\Diagnostics\StoreViewSnapshot;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
+use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\EnvironmentState;
 
 /**
@@ -61,6 +61,7 @@ class StatusCommandTest extends TestCase
             storeViews: [],
             recentSubmissionOutcomes: [],
             environment: $this->emptyEnvironmentState(),
+            connectorVersion: $this->uncheckedConnectorVersionState(),
         );
 
         $tester = new CommandTester($this->command(snapshot: $snapshot));
@@ -94,6 +95,7 @@ class StatusCommandTest extends TestCase
             ],
             recentSubmissionOutcomes: [],
             environment: $this->emptyEnvironmentState(),
+            connectorVersion: $this->uncheckedConnectorVersionState(),
         );
 
         $tester = new CommandTester($this->command(snapshot: $snapshot));
@@ -151,6 +153,7 @@ class StatusCommandTest extends TestCase
                 ),
             ],
             environment: $this->emptyEnvironmentState(),
+            connectorVersion: $this->uncheckedConnectorVersionState(),
         );
 
         $tester = new CommandTester($this->command(snapshot: $snapshot));
@@ -177,7 +180,7 @@ class StatusCommandTest extends TestCase
         self::assertStringContainsString('Environment: no data yet (run watchtower:sync).', $tester->getDisplay());
     }
 
-    public function testPrintsMagentoEolWarningAndConnectorUpdateNotice(): void
+    public function testPrintsMagentoEolWarning(): void
     {
         $snapshot = new DiagnosticsSnapshot(
             reachable: true,
@@ -195,9 +198,9 @@ class StatusCommandTest extends TestCase
                 magentoEdition: 'Community',
                 connectorVersion: '1.0.1',
                 magentoEol: new MagentoEolInfo(isEol: true, eolDate: '2025-06-11', statusLabel: 'eol'),
-                connectorUpdate: new ConnectorUpdateInfo(updateAvailable: true, latestVersion: '1.1.0'),
                 syncedAt: new \DateTimeImmutable('2026-08-14T10:00:00+00:00'),
             ),
+            connectorVersion: $this->uncheckedConnectorVersionState(),
         );
 
         $tester = new CommandTester($this->command(snapshot: $snapshot));
@@ -207,7 +210,96 @@ class StatusCommandTest extends TestCase
         self::assertStringContainsString('Magento: Community 2.4.6-p5', $display);
         self::assertStringContainsString('EOL since 2025-06-11', $display);
         self::assertStringContainsString('Connector: v1.0.1', $display);
-        self::assertStringContainsString('v1.1.0 available', $display);
+    }
+
+    public function testPrintsNoDataYetWhenTheVersionCheckHasNeverSucceeded(): void
+    {
+        $tester = new CommandTester($this->command());
+        $tester->execute([]);
+
+        self::assertStringContainsString('Connector version check: no data yet.', $tester->getDisplay());
+    }
+
+    /**
+     * Self-disabled is the state support most needs this command to explain:
+     * every other section can look healthy while nothing is being submitted,
+     * so the reason has to be stated outright rather than inferred from the
+     * installed/minimum numbers.
+     */
+    public function testPrintsTheSelfDisabledReasonWhenBelowTheMinimumVersion(): void
+    {
+        $tester = new CommandTester($this->command(
+            snapshot: $this->snapshotWithConnectorVersion(new ConnectorVersionState(
+                installedVersion: '1.0.1',
+                minimumVersion: '1.2.0',
+                latestVersion: '1.2.0',
+                belowMinimum: true,
+                updateAvailable: true,
+                checkedAt: new \DateTimeImmutable('2026-08-14T10:00:00+00:00'),
+            ))
+        ));
+        $tester->execute([]);
+
+        $display = $tester->getDisplay();
+        self::assertStringContainsString(
+            'Connector version check: installed=1.0.1, minimum=1.2.0, latest=1.2.0',
+            $display
+        );
+        self::assertStringContainsString('Reporting is self-disabled', $display);
+        self::assertStringNotContainsString('An update is available.', $display);
+    }
+
+    /**
+     * Behind latest but at or above minimum is non-blocking -- it must read
+     * as an advisory, never as the self-disabled message.
+     */
+    public function testPrintsANonBlockingUpdateNoticeWhenBehindLatestButAtOrAboveMinimum(): void
+    {
+        $tester = new CommandTester($this->command(
+            snapshot: $this->snapshotWithConnectorVersion(new ConnectorVersionState(
+                installedVersion: '1.1.0',
+                minimumVersion: '1.0.0',
+                latestVersion: '1.2.0',
+                belowMinimum: false,
+                updateAvailable: true,
+                checkedAt: new \DateTimeImmutable('2026-08-14T10:00:00+00:00'),
+            ))
+        ));
+        $tester->execute([]);
+
+        $display = $tester->getDisplay();
+        self::assertStringContainsString('An update is available.', $display);
+        self::assertStringNotContainsString('self-disabled', $display);
+    }
+
+    private function snapshotWithConnectorVersion(ConnectorVersionState $connectorVersion): DiagnosticsSnapshot
+    {
+        return new DiagnosticsSnapshot(
+            reachable: true,
+            unreachableError: null,
+            keyValid: true,
+            organizationPaused: false,
+            lastSuccessfulSubmissionAt: null,
+            bufferedReportCount: 0,
+            droppedEventCountLast24Hours: 0,
+            cronHealth: new SignalSnapshot('cron_health', null, 1),
+            storeViews: [],
+            recentSubmissionOutcomes: [],
+            environment: $this->emptyEnvironmentState(),
+            connectorVersion: $connectorVersion,
+        );
+    }
+
+    private function uncheckedConnectorVersionState(): ConnectorVersionState
+    {
+        return new ConnectorVersionState(
+            installedVersion: null,
+            minimumVersion: null,
+            latestVersion: null,
+            belowMinimum: false,
+            updateAvailable: false,
+            checkedAt: null,
+        );
     }
 
     private function emptyEnvironmentState(): EnvironmentState
@@ -217,7 +309,6 @@ class StatusCommandTest extends TestCase
             magentoEdition: null,
             connectorVersion: null,
             magentoEol: null,
-            connectorUpdate: null,
             syncedAt: null,
         );
     }
@@ -242,6 +333,7 @@ class StatusCommandTest extends TestCase
                 storeViews: [],
                 recentSubmissionOutcomes: [],
                 environment: $this->emptyEnvironmentState(),
+                connectorVersion: $this->uncheckedConnectorVersionState(),
             );
         }
 

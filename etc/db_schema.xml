@@ -253,7 +253,7 @@
         </constraint>
     </table>
     <table name="watchtower_environment_state" resource="default" engine="innodb"
-           comment="Environment facts and the platform's EOL/update determination from the last sync, singleton row.">
+           comment="Environment facts and the platform-supplied EOL determination from the last sync, singleton row.">
         <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
         <column xsi:type="varchar" name="magento_version" nullable="true" length="32"
                 comment="This install's Magento version as of the last sync, e.g. 2.4.9"/>
@@ -266,11 +266,25 @@
         <column xsi:type="date" name="magento_eol_date" nullable="true" comment="Platform-supplied EOL date"/>
         <column xsi:type="varchar" name="magento_status_label" nullable="true" length="32"
                 comment="Platform-supplied status label, e.g. supported"/>
-        <column xsi:type="boolean" name="connector_update_available" nullable="true"
-                comment="Whether a newer connector release exists per the platform; null means undetermined"/>
-        <column xsi:type="varchar" name="connector_latest_version" nullable="true" length="32"
-                comment="Latest connector version known to the platform"/>
         <column xsi:type="timestamp" name="synced_at" nullable="true" comment="When this state was last refreshed"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="id"/>
+        </constraint>
+    </table>
+    <table name="watchtower_connector_version_state" resource="default" engine="innodb"
+           comment="Last successful GET connector-version check outcome, singleton row.">
+        <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
+        <column xsi:type="varchar" name="installed_version" nullable="true" length="32"
+                comment="This connector's own version as of the last successful check"/>
+        <column xsi:type="varchar" name="minimum_version" nullable="true" length="32"
+                comment="Platform-configured floor as of the last successful check"/>
+        <column xsi:type="varchar" name="latest_version" nullable="true" length="32"
+                comment="Platform-configured latest as of the last successful check"/>
+        <column xsi:type="boolean" name="below_minimum" nullable="false" default="false"
+                comment="Whether submission is currently self-disabled for being below minimum_version"/>
+        <column xsi:type="boolean" name="update_available" nullable="false" default="false"
+                comment="Non-blocking: installed_version is below latest_version but at/above minimum_version"/>
+        <column xsi:type="timestamp" name="checked_at" nullable="true" comment="When a check last succeeded"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="id"/>
         </constraint>

@@ -9,14 +9,13 @@ declare(strict_types=1);
 namespace Watchtower\Connector\Model\Environment;
 
 use Magento\Framework\App\ResourceConnection;
-use Watchtower\Connector\Model\Api\ConnectorUpdateInfo;
 use Watchtower\Connector\Model\Api\MagentoEolInfo;
 
 /**
  * CRUD for watchtower_environment_state, a singleton row (same pattern as
  * OrganizationStateRepository) caching the environment facts from the last
- * successful sync and the platform's own EOL/update determination that came
- * back with it.
+ * successful sync and the platform's own EOL determination that came back
+ * with it.
  */
 class EnvironmentStateRepository
 {
@@ -51,7 +50,6 @@ class EnvironmentStateRepository
                 magentoEdition: null,
                 connectorVersion: null,
                 magentoEol: null,
-                connectorUpdate: null,
                 syncedAt: null,
             );
         }
@@ -65,10 +63,6 @@ class EnvironmentStateRepository
                 eolDate: $row['magento_eol_date'],
                 statusLabel: $row['magento_status_label'],
             ),
-            connectorUpdate: $row['connector_update_available'] === null ? null : new ConnectorUpdateInfo(
-                updateAvailable: (bool) $row['connector_update_available'],
-                latestVersion: $row['connector_latest_version'],
-            ),
             syncedAt: $row['synced_at'] === null
                 ? null
                 : new \DateTimeImmutable($row['synced_at'], new \DateTimeZone('UTC')),
@@ -76,13 +70,12 @@ class EnvironmentStateRepository
     }
 
     /**
-     * Records the environment facts from a successful sync and the platform's own EOL/update determination.
+     * Records the environment facts from a successful sync and the platform's own EOL determination.
      *
      * @param string|null $magentoVersion
      * @param string|null $magentoEdition
      * @param string|null $connectorVersion
      * @param MagentoEolInfo|null $magentoEol
-     * @param ConnectorUpdateInfo|null $connectorUpdate
      * @param \DateTimeImmutable $now
      * @return void
      */
@@ -91,7 +84,6 @@ class EnvironmentStateRepository
         ?string $magentoEdition,
         ?string $connectorVersion,
         ?MagentoEolInfo $magentoEol,
-        ?ConnectorUpdateInfo $connectorUpdate,
         \DateTimeImmutable $now
     ): void {
         $connection = $this->resourceConnection->getConnection();
@@ -105,8 +97,6 @@ class EnvironmentStateRepository
             'magento_is_eol' => $magentoEol === null ? null : (int) $magentoEol->isEol,
             'magento_eol_date' => $magentoEol?->eolDate,
             'magento_status_label' => $magentoEol?->statusLabel,
-            'connector_update_available' => $connectorUpdate === null ? null : (int) $connectorUpdate->updateAvailable,
-            'connector_latest_version' => $connectorUpdate?->latestVersion,
             'synced_at' => $now->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
         ];
 

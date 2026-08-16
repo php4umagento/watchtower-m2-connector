@@ -187,5 +187,19 @@
         "constraint": {
             "PRIMARY": true
         }
+    },
+    "watchtower_connector_version_state": {
+        "column": {
+            "id": true,
+            "installed_version": true,
+            "minimum_version": true,
+            "latest_version": true,
+            "below_minimum": true,
+            "update_available": true,
+            "checked_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
     }
 }

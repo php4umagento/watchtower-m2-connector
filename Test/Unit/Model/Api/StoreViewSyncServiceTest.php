@@ -15,6 +15,8 @@ use Watchtower\Connector\Model\Api\Client;
 use Watchtower\Connector\Model\Api\Response;
 use Watchtower\Connector\Model\Api\StoreViewSyncService;
 use Watchtower\Connector\Model\Environment\ConnectorVersionReader;
+use Watchtower\Connector\Model\Environment\ConnectorVersionState;
+use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\Environment\MagentoVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
@@ -73,7 +75,7 @@ class StoreViewSyncServiceTest extends TestCase
         self::assertSame('1.1.0', $capturedPayload['connector_version']);
     }
 
-    public function testParsesMagentoEolAndConnectorUpdateFromTheResponse(): void
+    public function testParsesMagentoEolFromTheResponse(): void
     {
         $storeManager = $this->createStub(StoreManagerInterface::class);
         $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
@@ -84,7 +86,6 @@ class StoreViewSyncServiceTest extends TestCase
             'created' => [],
             'rejected' => [],
             'magento_eol' => ['is_eol' => true, 'eol_date' => '2025-06-11', 'status_label' => 'eol'],
-            'connector_update' => ['update_available' => true, 'latest_version' => '1.2.0'],
         ]));
 
         $result = $this->service($storeManager, $client)->sync('https://watchtower.test', 'a-real-api-key');
@@ -92,18 +93,15 @@ class StoreViewSyncServiceTest extends TestCase
         self::assertNotNull($result->magentoEol);
         self::assertTrue($result->magentoEol->isEol);
         self::assertSame('2025-06-11', $result->magentoEol->eolDate);
-        self::assertNotNull($result->connectorUpdate);
-        self::assertTrue($result->connectorUpdate->updateAvailable);
-        self::assertSame('1.2.0', $result->connectorUpdate->latestVersion);
+        self::assertSame('eol', $result->magentoEol->statusLabel);
     }
 
     /**
-     * A response from a platform version that doesn't send these fields yet
-     * (or couldn't determine either) must not be misread as "definitely not
-     * EOL" / "definitely no update" -- both must come back null, not a
-     * false-y info object.
+     * A response from a platform version that doesn't send this field yet
+     * (or couldn't determine it) must not be misread as "definitely not
+     * EOL" -- it must come back null, not a false-y info object.
      */
-    public function testMagentoEolAndConnectorUpdateAreNullWhenAbsentFromTheResponse(): void
+    public function testMagentoEolIsNullWhenAbsentFromTheResponse(): void
     {
         $storeManager = $this->createStub(StoreManagerInterface::class);
         $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
@@ -116,7 +114,6 @@ class StoreViewSyncServiceTest extends TestCase
         $result = $this->service($storeManager, $client)->sync('https://watchtower.test', 'a-real-api-key');
 
         self::assertNull($result->magentoEol);
-        self::assertNull($result->connectorUpdate);
     }
 
     public function testASuccessfulSyncPersistsTheEnvironmentStateForLaterOfflineDisplay(): void
@@ -130,7 +127,6 @@ class StoreViewSyncServiceTest extends TestCase
             'created' => [],
             'rejected' => [],
             'magento_eol' => ['is_eol' => false, 'eol_date' => '2027-04-09', 'status_label' => 'supported'],
-            'connector_update' => ['update_available' => false, 'latest_version' => '1.1.0'],
         ]));
 
         $savedArgs = null;
@@ -151,6 +147,7 @@ class StoreViewSyncServiceTest extends TestCase
             $this->magentoVersionReaderStub(),
             $this->connectorVersionReaderStub(),
             $environmentStateRepository,
+            $this->connectorVersionStateRepositoryStub(),
             $this->createStub(LoggerInterface::class)
         );
         $service->sync('https://watchtower.test', 'a-real-api-key');
@@ -159,8 +156,7 @@ class StoreViewSyncServiceTest extends TestCase
         self::assertSame('Community', $savedArgs[1]);
         self::assertSame('1.1.0', $savedArgs[2]);
         self::assertFalse($savedArgs[3]->isEol);
-        self::assertFalse($savedArgs[4]->updateAvailable);
-        self::assertInstanceOf(\DateTimeImmutable::class, $savedArgs[5]);
+        self::assertInstanceOf(\DateTimeImmutable::class, $savedArgs[4]);
     }
 
     public function testAFailedSyncNeverPersistsEnvironmentState(): void
@@ -184,6 +180,7 @@ class StoreViewSyncServiceTest extends TestCase
             $this->magentoVersionReaderStub(),
             $this->connectorVersionReaderStub(),
             $environmentStateRepository,
+            $this->connectorVersionStateRepositoryStub(),
             $this->createStub(LoggerInterface::class)
         );
         $result = $service->sync('https://watchtower.test', 'a-real-api-key');
@@ -328,6 +325,7 @@ class StoreViewSyncServiceTest extends TestCase
             $this->magentoVersionReaderStub(),
             $this->connectorVersionReaderStub(),
             $this->createStub(EnvironmentStateRepository::class),
+            $this->connectorVersionStateRepositoryStub(),
             $logger
         );
         $service->sync('https://watchtower.test', 'a-real-secret-key');
@@ -343,6 +341,34 @@ class StoreViewSyncServiceTest extends TestCase
         }
     }
 
+    /**
+     * PRD FR25: below the platform's minimum_version, sync stops too, not
+     * just metrics -- and like the paused gate it must short-circuit before
+     * the client is touched at all, since an install syncing from a version
+     * the platform has disowned is exactly what self-disabling exists to
+     * prevent.
+     */
+    public function testDoesNotSyncWhileTheConnectorIsBelowTheMinimumVersion(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $client = $this->createMock(Client::class);
+        $client->expects(self::never())->method('post');
+
+        $result = $this->service(
+            $storeManager,
+            $client,
+            connectorVersionStateRepository: $this->connectorVersionStateRepositoryStub(belowMinimum: true)
+        )->sync('https://watchtower.test', 'a-real-api-key');
+
+        self::assertFalse($result->succeeded);
+        self::assertSame(
+            'Connector version is below the minimum supported version; not syncing store views.',
+            $result->errorMessage
+        );
+    }
+
     private function pausedStub(bool $paused): OrganizationStateRepository
     {
         $repository = $this->createStub(OrganizationStateRepository::class);
@@ -354,7 +380,8 @@ class StoreViewSyncServiceTest extends TestCase
     private function service(
         StoreManagerInterface $storeManager,
         Client $client,
-        ?OrganizationStateRepository $organizationStateRepository = null
+        ?OrganizationStateRepository $organizationStateRepository = null,
+        ?ConnectorVersionStateRepository $connectorVersionStateRepository = null
     ): StoreViewSyncService {
         if ($organizationStateRepository === null) {
             $organizationStateRepository = $this->createStub(OrganizationStateRepository::class);
@@ -368,6 +395,7 @@ class StoreViewSyncServiceTest extends TestCase
             $this->magentoVersionReaderStub(),
             $this->connectorVersionReaderStub(),
             $this->createStub(EnvironmentStateRepository::class),
+            $connectorVersionStateRepository ?? $this->connectorVersionStateRepositoryStub(),
             $this->createStub(LoggerInterface::class)
         );
     }
@@ -379,6 +407,21 @@ class StoreViewSyncServiceTest extends TestCase
         $reader->method('edition')->willReturn('Community');
 
         return $reader;
+    }
+
+    private function connectorVersionStateRepositoryStub(bool $belowMinimum = false): ConnectorVersionStateRepository
+    {
+        $repository = $this->createStub(ConnectorVersionStateRepository::class);
+        $repository->method('get')->willReturn(new ConnectorVersionState(
+            installedVersion: '1.1.0',
+            minimumVersion: $belowMinimum ? '1.2.0' : '1.0.0',
+            latestVersion: '1.2.0',
+            belowMinimum: $belowMinimum,
+            updateAvailable: true,
+            checkedAt: new \DateTimeImmutable('2026-08-14T10:00:00+00:00'),
+        ));
+
+        return $repository;
     }
 
     private function connectorVersionReaderStub(): ConnectorVersionReader

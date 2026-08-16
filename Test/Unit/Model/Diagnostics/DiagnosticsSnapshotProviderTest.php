@@ -15,6 +15,8 @@ use Watchtower\Connector\Model\Api\PingService;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
+use Watchtower\Connector\Model\Environment\ConnectorVersionState;
+use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\Environment\EnvironmentState;
 use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\CronHealth\Evaluator as CronHealthEvaluator;
@@ -36,7 +38,7 @@ use Watchtower\Connector\Test\Unit\StoreStubTrait;
 
 /**
  * Proves DiagnosticsSnapshotProvider assembles a full DiagnosticsSnapshot
- * from its 9 read-only sources -- this is the shared layer both
+ * from its 10 read-only sources -- this is the shared layer both
  * watchtower:status and the admin diagnostics page render, so its own
  * assembly logic is tested independently of either presentation.
  */
@@ -265,6 +267,44 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         self::assertSame($outcomes, $snapshot->recentSubmissionOutcomes);
     }
 
+    /**
+     * The version-check state is read from local storage, never from a live
+     * call, so it is surfaced even on the unconfigured path -- an install
+     * that has been self-disabled and then had its credentials cleared must
+     * still show WHY it stopped reporting.
+     */
+    public function testConnectorVersionStateIsSurfacedOnBothTheConfiguredAndUnconfiguredPaths(): void
+    {
+        $connectorVersionStateRepository = $this->createStub(ConnectorVersionStateRepository::class);
+        $connectorVersionStateRepository->method('get')->willReturn(new ConnectorVersionState(
+            installedVersion: '1.0.0',
+            minimumVersion: '1.2.0',
+            latestVersion: '1.2.0',
+            belowMinimum: true,
+            updateAvailable: true,
+            checkedAt: new \DateTimeImmutable('2026-08-14T08:30:00+00:00'),
+        ));
+
+        $unconfigured = $this->createStub(Config::class);
+        $unconfigured->method('isConfigured')->willReturn(false);
+
+        foreach ([null, $unconfigured] as $config) {
+            $snapshot = $this->provider(
+                config: $config,
+                connectorVersionStateRepository: $connectorVersionStateRepository,
+            )->snapshot($this->now());
+
+            self::assertSame('1.0.0', $snapshot->connectorVersion->installedVersion);
+            self::assertSame('1.2.0', $snapshot->connectorVersion->minimumVersion);
+            self::assertTrue($snapshot->connectorVersion->belowMinimum);
+            self::assertTrue($snapshot->connectorVersion->updateAvailable);
+            self::assertSame(
+                '2026-08-14T08:30:00+00:00',
+                $snapshot->connectorVersion->checkedAt?->format(\DateTimeInterface::ATOM)
+            );
+        }
+    }
+
     private function provider(
         ?Config $config = null,
         ?PingService $pingService = null,
@@ -277,6 +317,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         ?StoreManagerInterface $storeManager = null,
         ?SubmissionOutcomeRepository $submissionOutcomeRepository = null,
         ?EnvironmentStateRepository $environmentStateRepository = null,
+        ?ConnectorVersionStateRepository $connectorVersionStateRepository = null,
     ): DiagnosticsSnapshotProvider {
         if ($config === null) {
             $config = $this->createStub(Config::class);
@@ -341,8 +382,19 @@ class DiagnosticsSnapshotProviderTest extends TestCase
                 magentoEdition: null,
                 connectorVersion: null,
                 magentoEol: null,
-                connectorUpdate: null,
                 syncedAt: null,
+            ));
+        }
+
+        if ($connectorVersionStateRepository === null) {
+            $connectorVersionStateRepository = $this->createStub(ConnectorVersionStateRepository::class);
+            $connectorVersionStateRepository->method('get')->willReturn(new ConnectorVersionState(
+                installedVersion: null,
+                minimumVersion: null,
+                latestVersion: null,
+                belowMinimum: false,
+                updateAvailable: false,
+                checkedAt: null,
             ));
         }
 
@@ -358,6 +410,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             new LiveStoreViewResolver($storeManager),
             $submissionOutcomeRepository,
             $environmentStateRepository,
+            $connectorVersionStateRepository,
         );
     }
 

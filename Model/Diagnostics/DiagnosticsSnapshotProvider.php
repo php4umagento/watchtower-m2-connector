@@ -12,6 +12,7 @@ use Watchtower\Connector\Model\Api\PingService;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\CronHealth\Evaluator as CronHealthEvaluator;
+use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
 use Watchtower\Connector\Model\HealthState\HealthStateRepository;
@@ -49,6 +50,7 @@ class DiagnosticsSnapshotProvider
      * @param LiveStoreViewResolver $liveStoreViewResolver
      * @param SubmissionOutcomeRepository $submissionOutcomeRepository
      * @param EnvironmentStateRepository $environmentStateRepository
+     * @param ConnectorVersionStateRepository $connectorVersionStateRepository
      */
     public function __construct(
         private readonly Config $config,
@@ -62,6 +64,7 @@ class DiagnosticsSnapshotProvider
         private readonly LiveStoreViewResolver $liveStoreViewResolver,
         private readonly SubmissionOutcomeRepository $submissionOutcomeRepository,
         private readonly EnvironmentStateRepository $environmentStateRepository,
+        private readonly ConnectorVersionStateRepository $connectorVersionStateRepository,
     ) {
     }
 
@@ -95,6 +98,7 @@ class DiagnosticsSnapshotProvider
                 // previously-known EOL/update finding does not disappear the
                 // moment isConfigured() goes false.
                 environment: $this->environmentStateRepository->get(),
+                connectorVersion: $this->connectorVersionStateRepository->get(),
             );
         }
 
@@ -119,6 +123,7 @@ class DiagnosticsSnapshotProvider
             storeViews: $this->storeViewSnapshots(),
             recentSubmissionOutcomes: $this->submissionOutcomeRepository->recent($recentOutcomeLimit),
             environment: $this->environmentStateRepository->get(),
+            connectorVersion: $this->connectorVersionStateRepository->get(),
         );
     }
 

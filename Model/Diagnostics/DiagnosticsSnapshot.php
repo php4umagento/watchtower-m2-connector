@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Model\Diagnostics;
 
+use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\EnvironmentState;
 
 /**
@@ -27,8 +28,10 @@ class DiagnosticsSnapshot
      * @param SignalSnapshot $cronHealth
      * @param StoreViewSnapshot[] $storeViews
      * @param SubmissionOutcome[] $recentSubmissionOutcomes newest first
-     * @param EnvironmentState $environment last-known Magento/connector version and EOL/update
-     *     status, from the last successful sync -- never re-fetched just to render this snapshot
+     * @param EnvironmentState $environment last-known Magento/connector version and EOL status,
+     *     from the last successful sync -- never re-fetched just to render this snapshot
+     * @param ConnectorVersionState $connectorVersion last successful GET connector-version check
+     *     outcome (PRD FR24-FR27), including whether reporting is currently self-disabled
      */
     public function __construct(
         public readonly bool $reachable,
@@ -42,6 +45,7 @@ class DiagnosticsSnapshot
         public readonly array $storeViews,
         public readonly array $recentSubmissionOutcomes,
         public readonly EnvironmentState $environment,
+        public readonly ConnectorVersionState $connectorVersion,
     ) {
     }
 }

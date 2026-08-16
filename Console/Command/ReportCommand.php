@@ -81,9 +81,12 @@ class ReportCommand extends Command
         $result = $outcome['result'];
 
         if ($result === null) {
-            $reason = $outcome['organizationPaused']
-                ? 'organization is paused'
-                : 'still backing off after a prior failure';
+            $reason = match (true) {
+                $outcome['belowMinimumVersion'] => 'connector version is below the platform\'s '
+                    . 'minimum supported version',
+                $outcome['organizationPaused'] => 'organization is paused',
+                default => 'still backing off after a prior failure',
+            };
 
             $output->writeln(sprintf(
                 '<info>cron_health: %s (%s)</info> -- %s, not submitted this run.',
@@ -91,10 +94,14 @@ class ReportCommand extends Command
                 $report->reason->value,
                 $reason
             ));
-            $output->writeln($outcome['organizationPaused']
-                ? 'Buffered -- will be included automatically once the organization is unpaused.'
-                : 'Buffered -- will be included automatically once the backoff window '
-                    . 'passes and Watchtower is reachable.');
+            $output->writeln(match (true) {
+                $outcome['belowMinimumVersion'] => 'Buffered -- will be included automatically once the '
+                    . 'connector is upgraded.',
+                $outcome['organizationPaused'] => 'Buffered -- will be included automatically once the '
+                    . 'organization is unpaused.',
+                default => 'Buffered -- will be included automatically once the backoff window '
+                    . 'passes and Watchtower is reachable.',
+            });
 
             return Command::SUCCESS;
         }
