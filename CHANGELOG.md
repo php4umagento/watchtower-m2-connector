@@ -5,6 +5,19 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.3.0] - 2026-08-19
+
+Composer package renamed from `watchtower/module-connector` to
+`php4u/module-connector` -- the `watchtower` vendor namespace is already in
+use by an unrelated party on Packagist, blocking this module from ever being
+published there under it. The Magento module identifier
+(`Watchtower_Connector`) and PHP namespace (`Watchtower\Connector`) are
+unaffected; only the Composer vendor prefix changes. `ConnectorVersionReader`
+looks itself up in `Composer\InstalledVersions` by package name, so it is
+updated in lockstep -- installs still on the old package name will read as
+"not Composer-managed" (`version()` returns `null`) until upgraded via
+`composer require php4u/module-connector`.
+
 ## [1.2.0] - 2026-08-16
 
 Every reporting cycle now asks the platform `GET
