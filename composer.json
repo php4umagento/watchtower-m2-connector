@@ -1,5 +1,5 @@
 {
-    "name": "watchtower/module-connector",
+    "name": "php4u/module-connector",
     "description": "Watchtower monitoring connector - observes store data locally and reports coarse anomaly statuses to the Watchtower platform. See LICENSE.",
     "type": "magento2-module",
     "keywords": [
