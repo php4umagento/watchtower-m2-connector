@@ -5,6 +5,22 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.4.1] - 2026-08-19
+
+Composer package renamed a third time, from `php4u/watchtower-m2-module-connector`
+to `php4u/module-watchtower-m2-connector` -- v1.4.0 broke Magento's own
+`Magento_Unit_Tests_Other` PHPUnit suite for this module entirely and
+silently (0 tests collected, no error): its `vendor/*/module-*/Test/Unit`
+glob (`dev/tests/unit/phpunit.xml.dist`, Magento core, not something this
+repo controls) requires the vendor package directory to literally start
+with `module-`, which `watchtower-m2-module-connector` does not.
+`module-watchtower-m2-connector` does. Same lockstep update to
+`ConnectorVersionReader::PACKAGE_NAME` as the previous two renames;
+installs on either prior name read as "not Composer-managed" until
+upgraded via `composer require php4u/module-watchtower-m2-connector`.
+`php4u/watchtower-m2-module-connector` was never published to Packagist,
+so there is no abandoned-package cleanup needed there this time.
+
 ## [1.4.0] - 2026-08-19
 
 Composer package renamed again, from `php4u/module-connector` to
