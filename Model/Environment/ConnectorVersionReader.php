@@ -18,7 +18,7 @@ use Composer\InstalledVersions;
  */
 class ConnectorVersionReader
 {
-    private const PACKAGE_NAME = 'php4u/module-connector';
+    private const PACKAGE_NAME = 'php4u/watchtower-m2-module-connector';
 
     /**
      * This module's own version, e.g. "1.1.0", or null if this isn't a real

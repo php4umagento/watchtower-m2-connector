@@ -43,7 +43,7 @@ old copy of this file.)
 ## Installation
 
 ```
-composer require php4u/module-connector
+composer require php4u/watchtower-m2-module-connector
 bin/magento module:enable Watchtower_Connector
 bin/magento setup:upgrade
 ```
