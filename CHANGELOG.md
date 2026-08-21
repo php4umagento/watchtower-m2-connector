@@ -5,6 +5,27 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.7.0] - 2026-08-21
+
+Replaces `Cron\ReportJob`'s per-install "jitter minute" guard with an
+elapsed-time one. The old design compared the current wall-clock minute
+against a fixed per-install offset (derived from the API key), tolerant of
+a few minutes' drift -- correct as long as the host's own system cron
+invokes `bin/magento cron:run` at least as often as this job's own
+5-minute schedule. On a real production install whose host only ran
+`cron:run` every 10 minutes, this install's offset landed on a slot that
+was never reached, so the real evaluate-and-submit cycle silently never
+ran, permanently -- Magento's own cron_schedule table showed it as
+"missed" every single hour, forever, with nothing else anywhere
+indicating a problem. `ReportJob` now tracks elapsed time since its last
+real run (new singleton-row table, `watchtower_report_cycle_state`)
+instead of a wall-clock bucket, so it self-corrects regardless of how
+often -- or how irregularly -- the host's own cron actually ticks, as
+long as it ticks at all. Also naturally staggers installs across the hour
+better than the old hash-based bucketing did, since each one's cycle is
+now anchored to whenever it first ran rather than one of only 12 shared
+slots.
+
 ## [1.6.0] - 2026-08-21
 
 Fixes a real-world first-install bug: saving Base URL, API Key, and Enabled

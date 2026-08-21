@@ -9,14 +9,13 @@
         xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Cron:etc/crontab.xsd">
     <group id="default">
         <!--
-            Polled every 5 minutes, but Cron\ReportJob's own jitter guard
-            (see that class's docblock) makes the real evaluate-and-submit
-            cycle actually run only once per hour, at a per-install offset
-            derived from the install's own API key rather than always at
-            :00. Every install ships the identical etc/crontab.xml, so a
-            fixed schedule here would mean every merchant's connector
-            submits at the same wall-clock moment; ReportJob itself no-ops
-            on 11 of every 12 ticks to avoid that.
+            Polled every 5 minutes, but Cron\ReportJob's own elapsed-time
+            guard (see that class's docblock) makes the real evaluate-and-
+            submit cycle actually run only roughly once per hour -- and,
+            unlike an exact wall-clock schedule, self-corrects regardless of
+            how often the host's own system cron actually invokes
+            bin/magento cron:run, which is not guaranteed to match this
+            schedule's own 5-minute granularity.
         -->
         <job name="watchtower_report" instance="Watchtower\Connector\Cron\ReportJob" method="execute">
             <schedule>*/5 * * * *</schedule>

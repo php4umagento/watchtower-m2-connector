@@ -301,4 +301,13 @@
             <column name="id"/>
         </constraint>
     </table>
+    <table name="watchtower_report_cycle_state" resource="default" engine="innodb"
+           comment="When Cron\ReportJob's real evaluate-and-submit cycle last ran, singleton row.">
+        <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
+        <column xsi:type="timestamp" name="last_run_at" nullable="true"
+                comment="When the real cycle last ran; null if it never has"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="id"/>
+        </constraint>
+    </table>
 </schema>
