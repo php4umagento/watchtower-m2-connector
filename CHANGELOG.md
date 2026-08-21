@@ -5,6 +5,23 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.5.0] - 2026-08-21
+
+The platform now tags a sync rejection with `reason_code: ignored_local_domain`
+when a store view's reported URL looks like a local/dev environment or a
+private IP (PRD §5.9, FR28-30) rather than a live storefront. This module
+surfaces that instead of leaving it buried in a debug log line: a
+persistent, NOTICE-severity Magento admin notice (same mechanism as the
+below-minimum-version warning) names the affected store view and clears
+itself once a sync stops reporting any, backed by a new singleton-row
+table (`watchtower_ignored_domain_state`). The config screen also gets a
+proactive heads-up, before the merchant ever syncs, when the current
+store's own base URL looks local/dev -- a connector-local heuristic,
+advisory only, since the platform's real blacklist is admin-configurable
+and not exposed here. Also links the config screen and README to the
+platform's existing "create a project" / "find your API key" docs, which
+weren't linked from the module anywhere before.
+
 ## [1.4.1] - 2026-08-19
 
 Composer package renamed a third time, from `php4u/watchtower-m2-module-connector`
