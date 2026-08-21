@@ -5,6 +5,31 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.9.0] - 2026-08-21
+
+Adds a "Configuration" item under the Watchtower admin menu, linking
+directly to the config screen (`Stores > Configuration > Watchtower`)
+instead of requiring the admin to navigate there manually. Also adds
+`ConnectorUpdateAvailable`, the PRD FR27 admin notice that was specified
+but never actually implemented: a persistent, non-blocking notice shown
+whenever the installed version is at/above `minimum_version` but below
+`latest_version` (suppressed while also below minimum, since that state
+already shows its own more urgent notice for the same gap). Previously
+this information only existed buried in the Diagnostics page's "Reporting
+Status" row.
+
+**Also fixes a real, previously-undetected bug**: several `etc/db_schema.xml`
+table/column comments contained an apostrophe or backslash, e.g. "This
+install's Magento version...". MySQL's declarative-schema comment
+sync generates `ALTER TABLE ... COMMENT='...'` with the value interpolated
+directly, unescaped — an apostrophe there breaks the SQL outright.
+Confirmed live: `bin/magento setup:upgrade` failed with a SQL syntax
+error on `watchtower_report_cycle_state`'s own comment, introduced in
+v1.7.0. Reworded every affected comment in the module (nine of them, not
+just the one that happened to fail) to avoid apostrophes and backslashes
+entirely, and verified `setup:upgrade` now completes and is idempotent on
+a fresh run.
+
 ## [1.8.1] - 2026-08-21
 
 Fixes invalid XML shipped in v1.7.0/v1.8.0: `etc/crontab.xml`'s comment

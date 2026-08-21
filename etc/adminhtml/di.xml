@@ -13,6 +13,9 @@
                 <item name="watchtower_below_minimum_version" xsi:type="string">
                     Watchtower\Connector\Model\System\Message\ConnectorVersionBelowMinimum
                 </item>
+                <item name="watchtower_connector_update_available" xsi:type="string">
+                    Watchtower\Connector\Model\System\Message\ConnectorUpdateAvailable
+                </item>
                 <item name="watchtower_store_views_ignored_as_local_domain" xsi:type="string">
                     Watchtower\Connector\Model\System\Message\StoreViewsIgnoredAsLocalDomain
                 </item>

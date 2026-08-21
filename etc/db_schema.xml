@@ -133,7 +133,7 @@
         <column xsi:type="date" name="day_bucket" nullable="false"
                 comment="UTC calendar day this row counts"/>
         <column xsi:type="int" name="count" unsigned="true" nullable="false" default="0"
-                comment="Event count summed from that day's hourly rows"/>
+                comment="Event count summed from the hourly rows for that day"/>
         <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
                 comment="Last written"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
@@ -256,13 +256,13 @@
            comment="Environment facts and the platform-supplied EOL determination from the last sync, singleton row.">
         <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
         <column xsi:type="varchar" name="magento_version" nullable="true" length="32"
-                comment="This install's Magento version as of the last sync, e.g. 2.4.9"/>
+                comment="Magento version reported by this install as of the last sync, e.g. 2.4.9"/>
         <column xsi:type="varchar" name="magento_edition" nullable="true" length="32"
-                comment="This install's Magento edition as of the last sync, e.g. Community"/>
+                comment="Magento edition reported by this install as of the last sync, e.g. Community"/>
         <column xsi:type="varchar" name="connector_version" nullable="true" length="32"
-                comment="This connector's own installed version as of the last sync"/>
+                comment="The installed version of this connector module, as of the last sync"/>
         <column xsi:type="boolean" name="magento_is_eol" nullable="true"
-                comment="Platform's EOL determination for magento_version/magento_edition; null means undetermined"/>
+                comment="Platform-supplied EOL determination for magento_version/magento_edition; null means undetermined"/>
         <column xsi:type="date" name="magento_eol_date" nullable="true" comment="Platform-supplied EOL date"/>
         <column xsi:type="varchar" name="magento_status_label" nullable="true" length="32"
                 comment="Platform-supplied status label, e.g. supported"/>
@@ -275,7 +275,7 @@
            comment="Last successful GET connector-version check outcome, singleton row.">
         <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
         <column xsi:type="varchar" name="installed_version" nullable="true" length="32"
-                comment="This connector's own version as of the last successful check"/>
+                comment="The installed version of this connector module, as of the last successful check"/>
         <column xsi:type="varchar" name="minimum_version" nullable="true" length="32"
                 comment="Platform-configured floor as of the last successful check"/>
         <column xsi:type="varchar" name="latest_version" nullable="true" length="32"
@@ -290,19 +290,19 @@
         </constraint>
     </table>
     <table name="watchtower_ignored_domain_state" resource="default" engine="innodb"
-           comment="Last sync's ignored-local-domain outcome (PRD FR28-30), singleton row.">
+           comment="Last sync ignored-local-domain outcome (PRD FR28-30), singleton row.">
         <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
         <column xsi:type="int" name="ignored_count" unsigned="true" nullable="false" default="0"
                 comment="Store views the last sync rejected with reason_code ignored_local_domain"/>
         <column xsi:type="varchar" name="example_code" nullable="true" length="255"
-                comment="One rejected store view's code from the last sync, null when ignored_count is 0"/>
+                comment="One rejected store view code from the last sync, null when ignored_count is 0"/>
         <column xsi:type="timestamp" name="occurred_at" nullable="true" comment="When the last sync ran"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="id"/>
         </constraint>
     </table>
     <table name="watchtower_report_cycle_state" resource="default" engine="innodb"
-           comment="When Cron\ReportJob's real evaluate-and-submit cycle last ran, singleton row.">
+           comment="When the real ReportJob evaluate-and-submit cycle last ran, singleton row.">
         <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
         <column xsi:type="timestamp" name="last_run_at" nullable="true"
                 comment="When the real cycle last ran; null if it never has"/>

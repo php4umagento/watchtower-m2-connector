@@ -10,6 +10,10 @@
     <menu>
         <add id="Watchtower_Connector::watchtower" title="Watchtower" translate="title"
              module="Watchtower_Connector" sortOrder="65" resource="Watchtower_Connector::watchtower"/>
+        <add id="Watchtower_Connector::configuration" title="Configuration" translate="title"
+             module="Watchtower_Connector" sortOrder="5" parent="Watchtower_Connector::watchtower"
+             action="adminhtml/system_config/edit/section/watchtower"
+             resource="Watchtower_Connector::config_watchtower"/>
         <add id="Watchtower_Connector::integration_health" title="Integration Health Sources" translate="title"
              module="Watchtower_Connector" sortOrder="10" parent="Watchtower_Connector::watchtower"
              action="watchtower/integrationhealth/index" resource="Watchtower_Connector::integration_health"/>
