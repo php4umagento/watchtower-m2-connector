@@ -5,6 +5,27 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.10.0] - 2026-08-21
+
+`watchtower_event_counter` and `watchtower_event_drop_counter` had no
+pruning mechanism at all — every store view's hourly login/logout
+counters grew unbounded for the life of the install, unlike the
+`watchtower_rollup_*` tables, which already roll up and prune on a
+daily cadence. Adds `EventCounterRepository::prune()` (90-day
+retention, mirroring `RollupRepository::HOURLY_RETENTION_DAYS`), a
+scheduled `Cron\EventCounterPruneJob`, and a matching
+`watchtower:event-counter-prune` console command for manual use.
+
+**Also moves all four `watchtower_*` cron jobs into their own
+dedicated `watchtower` cron group** (`etc/cron_groups.xml`,
+`use_separate_process=1`), out of Magento's shared `default` group.
+Isolates this module's cron queue from core Magento's own default-group
+jobs in both directions. A merchant's crontab virtually always invokes
+`bin/magento cron:run` with no `--group` flag, which runs every group
+found in the merged `crontab.xml`, so this needed no merchant-side cron
+changes to keep firing — confirmed via direct `Cron\ConfigInterface`
+introspection against a real Magento install.
+
 ## [1.9.0] - 2026-08-21
 
 Adds a "Configuration" item under the Watchtower admin menu, linking
