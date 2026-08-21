@@ -16,22 +16,37 @@
             <group id="general" translate="label" type="text" sortOrder="1"
                    showInDefault="1" showInWebsite="0" showInStore="0">
                 <label>Connection</label>
+                <field id="local_domain_notice" sortOrder="5" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label/>
+                    <!-- Line length warning accepted here: frontend_model's XSD pattern
+                         forbids whitespace, so this value cannot wrap. -->
+                    <frontend_model>Watchtower\Connector\Block\Adminhtml\System\Config\LocalDomainNotice</frontend_model>
+                </field>
                 <field id="base_url" translate="label comment" type="text" sortOrder="10"
                        showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Watchtower Base URL</label>
-                    <comment>
-                        The base URL of your Watchtower platform. Pre-filled with the live
-                        Watchtower platform; only change this for a custom deployment.
-                    </comment>
+                    <comment><![CDATA[
+                The base URL of your Watchtower platform. Pre-filled with the live Watchtower
+                platform; only change this for a custom deployment. New to Watchtower? See
+                <a href="https://watchtower-commerce.com/docs/connecting-magento-2/installing-the-connector-module"
+                target="_blank" rel="noopener">installing the connector</a> and
+                <a href="https://watchtower-commerce.com/docs/connecting-magento-2/configuring-the-connector"
+                target="_blank" rel="noopener">configuring it</a>.
+                    ]]></comment>
                     <validate>required-entry validate-url</validate>
                 </field>
                 <field id="api_key" translate="label comment" type="obscure" sortOrder="20"
                        showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Install API Key</label>
                     <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
-                    <comment>
-                        Paste the install-scoped API key generated for this install on the Watchtower projects page.
-                    </comment>
+                    <comment><![CDATA[
+                Paste the install-scoped API key generated for this install on the Watchtower
+                projects page. Don't have a project yet? See
+                <a href="https://watchtower-commerce.com/docs/connecting-magento-2/add-the-magento-2-connector"
+                target="_blank" rel="noopener">how to create a project</a> and
+            <a href="https://watchtower-commerce.com/docs/connecting-magento-2/where-to-find-and-rotate-your-api-key"
+                target="_blank" rel="noopener">where to find and rotate your API key</a>.
+                    ]]></comment>
                     <validate>required-entry</validate>
                 </field>
                 <field id="enabled" translate="label comment" type="select" sortOrder="30"

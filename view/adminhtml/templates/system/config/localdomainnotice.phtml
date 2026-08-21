@@ -1,0 +1,22 @@
+<?php
+/**
+ * Copyright © 2026 Watchtower. All rights reserved.
+ * Licensed under the Business Source License 1.1 (BUSL-1.1). See LICENSE.
+ */
+
+/** @var \Watchtower\Connector\Block\Adminhtml\System\Config\LocalDomainNotice $block */
+/** @var \Magento\Framework\Escaper $escaper */
+
+if (!$block->shouldShowNotice()) {
+    return;
+}
+?>
+<div class="message message-notice">
+    <?= $escaper->escapeHtml(
+        __(
+            'This store\'s URL looks like a local or development environment. Watchtower ignores store views '
+                . 'reported from domains like this, so they won\'t appear on your dashboard -- this is expected '
+                . 'and does not indicate a problem.'
+        )
+    ) ?>
+</div>

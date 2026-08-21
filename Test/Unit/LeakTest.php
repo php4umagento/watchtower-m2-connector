@@ -29,6 +29,7 @@ use Watchtower\Connector\Model\RateSignal\DispersionState;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
 use Watchtower\Connector\Model\Rollup\HourlyCountSample;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
+use Watchtower\Connector\Model\StoreView\IgnoredDomainStateRepository;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 
 /**
@@ -77,6 +78,7 @@ class LeakTest extends TestCase
             $this->connectorVersionReaderStub(),
             $this->createStub(EnvironmentStateRepository::class),
             $this->connectorVersionStateRepositoryStub(),
+            $this->createStub(IgnoredDomainStateRepository::class),
             $this->createStub(LoggerInterface::class)
         );
         $service->sync('https://watchtower.test', 'secret-api-key-value');
@@ -144,6 +146,7 @@ class LeakTest extends TestCase
             $this->connectorVersionReaderStub(),
             $this->createStub(EnvironmentStateRepository::class),
             $this->connectorVersionStateRepositoryStub(),
+            $this->createStub(IgnoredDomainStateRepository::class),
             $this->createStub(LoggerInterface::class)
         );
         $service->sync('https://watchtower.test', $apiKey);
