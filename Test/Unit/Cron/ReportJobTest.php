@@ -15,97 +15,114 @@ use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
-use Watchtower\Connector\Model\Config;
+use Watchtower\Connector\Model\Reporting\ReportCycleState;
+use Watchtower\Connector\Model\Reporting\ReportCycleStateRepository;
 use Watchtower\Connector\Model\ReportingService;
 
 /**
- * Covers Cron\ReportJob's own submission-time jitter guard -- since
- * etc/crontab.xml polls this job every 5 minutes rather than once an
- * hour, ReportingService::run() must only actually be called on this
- * install's own deterministic offset minute, never on the other 11 of
- * every 12 ticks. The outcome-handling/logging behavior
- * (buffered/failed/rejected/backfill) is exercised here only
- * incidentally, via the "runs on the right minute" tests.
- *
- * "a-real-api-key" (the same fixture literal SyncJobTest already uses)
- * hashes to a jitter offset of :50; "test-key-B" hashes to :25 -- both
- * computed once via Cron\ReportJob::jitterOffsetMinutes()'s own formula and
- * pinned here as fixtures, proving the offset is a deterministic function
- * of the API key rather than depending on wall-clock time.
+ * Covers Cron\ReportJob's own elapsed-time guard -- since etc/crontab.xml
+ * polls this job every 5 minutes rather than once an hour,
+ * ReportingService::run() must only actually be called once
+ * MIN_INTERVAL_SECONDS has passed since the real cycle last ran, never on
+ * every tick. The outcome-handling/logging behavior
+ * (buffered/failed/rejected/backfill) is exercised here only incidentally,
+ * via the "is due" tests.
  */
 class ReportJobTest extends TestCase
 {
-    private const OFFSET_FOR_A_REAL_API_KEY = 50;
-    private const OFFSET_FOR_TEST_KEY_B = 25;
-
-    public function testRunsTheReportingCycleOnItsOwnJitterMinute(): void
+    public function testRunsWhenTheCycleHasNeverRunBefore(): void
     {
-        $config = $this->configWithApiKey('a-real-api-key');
-
         $reportingService = $this->createMock(ReportingService::class);
         $reportingService->expects(self::once())->method('run')->willReturn(['ran' => false]);
 
-        $now = new \DateTimeImmutable('2026-08-13 14:'.self::OFFSET_FOR_A_REAL_API_KEY.':00');
+        $repository = $this->repositoryReturning(lastRunAt: null);
+        $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $config, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
     }
 
-    public function testDoesNothingOnAnyOtherMinute(): void
+    public function testDoesNotRunWhenLessThanAnHourHasPassedSinceTheLastRun(): void
     {
-        $config = $this->configWithApiKey('a-real-api-key');
-
         $reportingService = $this->createMock(ReportingService::class);
         $reportingService->expects(self::never())->method('run');
 
-        $notMyMinute = (self::OFFSET_FOR_A_REAL_API_KEY + 5) % 60;
-        $now = new \DateTimeImmutable('2026-08-13 14:'.$notMyMinute.':00');
+        $repository = $this->repositoryReturning(lastRunAt: new \DateTimeImmutable('2026-08-13 14:00:00'));
+        $now = new \DateTimeImmutable('2026-08-13 14:59:59');
 
-        (new ReportJob($reportingService, $config, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
     }
 
-    public function testDifferentInstallsLandOnDifferentOffsets(): void
+    public function testRunsOnceExactlyAnHourHasPassedSinceTheLastRun(): void
     {
-        $config = $this->configWithApiKey('test-key-B');
-
         $reportingService = $this->createMock(ReportingService::class);
         $reportingService->expects(self::once())->method('run')->willReturn(['ran' => false]);
 
-        $now = new \DateTimeImmutable('2026-08-13 14:'.self::OFFSET_FOR_TEST_KEY_B.':00');
+        $repository = $this->repositoryReturning(lastRunAt: new \DateTimeImmutable('2026-08-13 14:00:00'));
+        $now = new \DateTimeImmutable('2026-08-13 15:00:00');
 
-        (new ReportJob($reportingService, $config, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
     }
 
-    public function testFallsBackToOffsetZeroWhenNotConfigured(): void
+    /**
+     * The whole point of this guard: it must not care what minute-of-hour
+     * "now" falls on, only how much time elapsed since the last real run --
+     * unlike the old per-install jitter-minute design, which silently never
+     * ran at all on a real install whose host only invoked cron:run every
+     * 10 minutes (see this class's git history / Cron\ReportJob's docblock).
+     */
+    public function testRunsRegardlessOfWallClockMinuteAsLongAsTheIntervalHasElapsed(): void
     {
-        $config = $this->createStub(Config::class);
-        $config->method('apiKey')->willReturn(null);
-
         $reportingService = $this->createMock(ReportingService::class);
         $reportingService->expects(self::once())->method('run')->willReturn(['ran' => false]);
+
+        $repository = $this->repositoryReturning(lastRunAt: new \DateTimeImmutable('2026-08-13 13:47:00'));
+        $now = new \DateTimeImmutable('2026-08-13 14:52:00');
+
+        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+    }
+
+    public function testDoesNotPersistARunWhenNotConfiguredOrDisabled(): void
+    {
+        $reportingService = $this->createStub(ReportingService::class);
+        $reportingService->method('run')->willReturn(['ran' => false]);
+
+        $repository = $this->createMock(ReportCycleStateRepository::class);
+        $repository->method('get')->willReturn(new ReportCycleState(lastRunAt: null));
+        $repository->expects(self::never())->method('save');
 
         $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $config, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
     }
 
-    public function testOnItsOwnMinuteAFailedSubmissionIsStillLoggedAndBuffered(): void
+    public function testPersistsTheRunWhenTheCycleActuallyRan(): void
     {
-        $config = $this->configWithApiKey('a-real-api-key');
-
-        $report = new MetricReport(
-            storeViewCode: null,
-            eventType: 'cron_health',
-            status: SignalStatus::Normal,
-            sequenceNumber: 1,
-            evaluatedAt: new \DateTimeImmutable(),
-            reason: ReportReason::Heartbeat,
-            rulesetVersion: '1.0.1',
-        );
-
         $reportingService = $this->createStub(ReportingService::class);
         $reportingService->method('run')->willReturn([
             'ran' => true,
-            'report' => $report,
+            'report' => $this->cronHealthReport(),
+            'storeViewReports' => [],
+            'result' => null,
+            'includedBufferedCount' => 0,
+            'expiredBufferedCount' => 0,
+            'evictedForCapacityCount' => 0,
+        ]);
+
+        $now = new \DateTimeImmutable('2026-08-13 14:00:00');
+
+        $repository = $this->createMock(ReportCycleStateRepository::class);
+        $repository->method('get')->willReturn(new ReportCycleState(lastRunAt: null));
+        $repository->expects(self::once())->method('save')->with($now);
+
+        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+    }
+
+    public function testADueRunWithAFailedSubmissionIsStillLoggedAndBuffered(): void
+    {
+        $reportingService = $this->createStub(ReportingService::class);
+        $reportingService->method('run')->willReturn([
+            'ran' => true,
+            'report' => $this->cronHealthReport(),
             'storeViewReports' => [],
             'result' => new MetricsSubmissionResult(succeeded: false, errorMessage: 'Connection refused'),
             'includedBufferedCount' => 0,
@@ -119,9 +136,10 @@ class ReportJobTest extends TestCase
             ['error' => 'Connection refused']
         );
 
-        $now = new \DateTimeImmutable('2026-08-13 14:'.self::OFFSET_FOR_A_REAL_API_KEY.':00');
+        $repository = $this->repositoryReturning(lastRunAt: null);
+        $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $config, $logger))->executeAt($now);
+        (new ReportJob($reportingService, $repository, $logger))->executeAt($now);
     }
 
     /**
@@ -132,15 +150,15 @@ class ReportJobTest extends TestCase
      * executeAt($now) directly and could never have caught a signature
      * mismatch on execute() itself -- this test calls execute() exactly the
      * way Magento's dispatcher does, extra positional argument included,
-     * and would have thrown a TypeError under the previous
-     * ?\DateTimeImmutable-typed signature.
+     * and would have thrown a TypeError under a DateTimeImmutable-typed
+     * signature.
      */
     public function testExecuteAcceptsAnExtraPositionalArgumentTheWayMagentosCronDispatcherCallsIt(): void
     {
-        $config = $this->createStub(Config::class);
-        $config->method('apiKey')->willReturn(null);
-
         $reportingService = $this->createStub(ReportingService::class);
+        $reportingService->method('run')->willReturn(['ran' => false]);
+
+        $repository = $this->repositoryReturning(lastRunAt: null);
 
         // A real Magento\Cron\Model\Schedule needs full DI construction
         // (context, registry, ...), which is unnecessary here: the bug was
@@ -151,51 +169,18 @@ class ReportJobTest extends TestCase
         // typed first parameter for PHP to reject this argument against.
         $scheduleStandIn = new \stdClass();
 
-        // apiKey() stubbed to null means the jitter guard defaults to offset
-        // 0, which real wall-clock "now" DOES occasionally land on (a 1-in-12
-        // chance every run) -- stub a valid outcome shape so that coincidence
-        // can never turn this into a flaky "Undefined array key" error; the
-        // test's own purpose is proving execute()'s signature, not exercising
-        // ReportingService::run()'s outcome handling.
-        $reportingService->method('run')->willReturn(['ran' => false]);
-
         // call_user_func_array($callback, [$schedule]) is what Magento's own
         // dispatcher does; reproduce that exact call shape rather than a
         // plain method call, since PHP only silently discards an unused
         // trailing argument when invoked this way, same as a normal call --
         // the point is proving execute()'s own signature accepts it, not
         // exercising a different invocation mechanism.
-        $job = new ReportJob($reportingService, $config, $this->createStub(LoggerInterface::class));
+        $job = new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class));
         call_user_func_array([$job, 'execute'], [$scheduleStandIn]);
 
         // No assertion beyond "did not throw" -- that IS the regression this
         // test exists to lock.
         self::assertTrue(true);
-    }
-
-    /**
-     * The behavioral fix for the second live-reproduced bug: comparing
-     * exact minutes silently missed an install's entire hourly report
-     * whenever real Magento cron execution drifted past the scheduled
-     * minute (measured on a real install: most executions land 60+ seconds
-     * late, some by over ten minutes). Bucket comparison tolerates drift
-     * within the bucket width -- this proves a tick a few minutes AFTER the
-     * install's own offset, still inside the same JITTER_BUCKET_MINUTES
-     * window, still triggers.
-     */
-    public function testToleratesDriftWithinTheJitterBucketWidth(): void
-    {
-        $config = $this->configWithApiKey('a-real-api-key');
-
-        $reportingService = $this->createMock(ReportingService::class);
-        $reportingService->expects(self::once())->method('run')->willReturn(['ran' => false]);
-
-        // Offset is :50; a tick landing at :53 (still within the [50,55)
-        // bucket) must still count as this install's own tick.
-        $driftedMinute = self::OFFSET_FOR_A_REAL_API_KEY + 3;
-        $now = new \DateTimeImmutable('2026-08-13 14:'.$driftedMinute.':00');
-
-        (new ReportJob($reportingService, $config, $this->createStub(LoggerInterface::class)))->executeAt($now);
     }
 
     /**
@@ -206,18 +191,6 @@ class ReportJobTest extends TestCase
      */
     public function testDedupRejectionsAreLoggedSeparatelyFromGenuineRejections(): void
     {
-        $config = $this->configWithApiKey('a-real-api-key');
-
-        $report = new MetricReport(
-            storeViewCode: null,
-            eventType: 'cron_health',
-            status: SignalStatus::Normal,
-            sequenceNumber: 1,
-            evaluatedAt: new \DateTimeImmutable(),
-            reason: ReportReason::Heartbeat,
-            rulesetVersion: '1.0.1',
-        );
-
         $dedupRejection = [
             'event_type' => 'cron_health',
             'sequence_number' => 1,
@@ -232,7 +205,7 @@ class ReportJobTest extends TestCase
         $reportingService = $this->createStub(ReportingService::class);
         $reportingService->method('run')->willReturn([
             'ran' => true,
-            'report' => $report,
+            'report' => $this->cronHealthReport(),
             'storeViewReports' => [],
             'result' => new MetricsSubmissionResult(
                 succeeded: true,
@@ -254,9 +227,10 @@ class ReportJobTest extends TestCase
             ['rejected' => [$genuineRejection]]
         );
 
-        $now = new \DateTimeImmutable('2026-08-13 14:'.self::OFFSET_FOR_A_REAL_API_KEY.':00');
+        $repository = $this->repositoryReturning(lastRunAt: null);
+        $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $config, $logger))->executeAt($now);
+        (new ReportJob($reportingService, $repository, $logger))->executeAt($now);
     }
 
     /**
@@ -268,22 +242,10 @@ class ReportJobTest extends TestCase
      */
     public function testANullResultNeverLogsRegardlessOfWhyItWasSkipped(): void
     {
-        $config = $this->configWithApiKey('a-real-api-key');
-
-        $report = new MetricReport(
-            storeViewCode: null,
-            eventType: 'cron_health',
-            status: SignalStatus::Normal,
-            sequenceNumber: 1,
-            evaluatedAt: new \DateTimeImmutable(),
-            reason: ReportReason::Heartbeat,
-            rulesetVersion: '1.0.1',
-        );
-
         $reportingService = $this->createStub(ReportingService::class);
         $reportingService->method('run')->willReturn([
             'ran' => true,
-            'report' => $report,
+            'report' => $this->cronHealthReport(),
             'storeViewReports' => [],
             'result' => null,
             'includedBufferedCount' => 0,
@@ -296,16 +258,30 @@ class ReportJobTest extends TestCase
         $logger->expects(self::never())->method('warning');
         $logger->expects(self::never())->method('info');
 
-        $now = new \DateTimeImmutable('2026-08-13 14:'.self::OFFSET_FOR_A_REAL_API_KEY.':00');
+        $repository = $this->repositoryReturning(lastRunAt: null);
+        $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $config, $logger))->executeAt($now);
+        (new ReportJob($reportingService, $repository, $logger))->executeAt($now);
     }
 
-    private function configWithApiKey(string $apiKey): Config
+    private function cronHealthReport(): MetricReport
     {
-        $config = $this->createStub(Config::class);
-        $config->method('apiKey')->willReturn($apiKey);
+        return new MetricReport(
+            storeViewCode: null,
+            eventType: 'cron_health',
+            status: SignalStatus::Normal,
+            sequenceNumber: 1,
+            evaluatedAt: new \DateTimeImmutable(),
+            reason: ReportReason::Heartbeat,
+            rulesetVersion: '1.0.1',
+        );
+    }
 
-        return $config;
+    private function repositoryReturning(?\DateTimeImmutable $lastRunAt): ReportCycleStateRepository
+    {
+        $repository = $this->createStub(ReportCycleStateRepository::class);
+        $repository->method('get')->willReturn(new ReportCycleState(lastRunAt: $lastRunAt));
+
+        return $repository;
     }
 }

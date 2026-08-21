@@ -108,13 +108,17 @@ Under the **Watchtower** menu:
 
 ## Cron schedule
 
-`watchtower_report` runs every 5 minutes by design, but only actually
-evaluates and submits once per hour — the connector jitters its real
-schedule to a per-install offset (derived from your own API key) within that
-hour, so every installation of this module doesn't submit at the exact same
-wall-clock minute. `watchtower_sync` and `watchtower_rollup_prune` both run
-once daily. None of this requires configuration; it's automatic once
-Magento's own cron is running.
+`watchtower_report` is polled every 5 minutes, but only actually evaluates
+and submits roughly once an hour, tracked by elapsed time since its last
+real run rather than a fixed wall-clock minute — so it self-corrects
+regardless of how often your host's own system cron actually invokes
+`bin/magento cron:run`, and naturally avoids every installation of this
+module submitting at the same moment. `watchtower_sync` and
+`watchtower_rollup_prune` both run once daily. None of this requires
+configuration; it's automatic once Magento's own cron is running — though
+the module can only ever run as often as `bin/magento cron:run` itself is
+actually invoked, so make sure your host's cron entry for it runs at least
+every 5 minutes (Magento's own recommendation is every 1 minute).
 
 ## License
 

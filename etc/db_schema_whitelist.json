@@ -212,5 +212,14 @@
         "constraint": {
             "PRIMARY": true
         }
+    },
+    "watchtower_report_cycle_state": {
+        "column": {
+            "id": true,
+            "last_run_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
     }
 }

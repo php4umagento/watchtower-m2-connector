@@ -10,30 +10,44 @@ namespace Watchtower\Connector\Cron;
 
 use Psr\Log\LoggerInterface;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
-use Watchtower\Connector\Model\Config;
+use Watchtower\Connector\Model\Reporting\ReportCycleStateRepository;
 use Watchtower\Connector\Model\ReportingService;
 
 /**
  * Scheduled counterpart to bin/magento watchtower:report, sharing ReportingService with it.
  *
- * etc/crontab.xml polls this every JITTER_BUCKET_MINUTES; most ticks return
- * immediately via isMyJitterMinute(). Every install ships the identical
- * crontab.xml, so a fixed "0 * * * *" would have every connector submit at the
- * same wall-clock moment -- the alignment this jitter breaks.
+ * etc/crontab.xml polls this every 5 minutes, but the real evaluate-and-submit
+ * cycle -- expensive: it evaluates every live store view's rate signals, not
+ * just a network call -- only actually runs roughly once an hour, gated by
+ * isDue() below rather than every tick.
+ *
+ * Previously gated on a per-install "jitter minute" derived from the API key
+ * hash, comparing against a tolerance window (see git history). That still
+ * assumed the host's own system cron invokes bin/magento cron:run at least
+ * as often as this job's own 5-minute schedule -- on a real production
+ * install whose host only ran cron:run every 10 minutes, this install's
+ * jitter window landed on a slot that was *never* actually reached, so the
+ * real cycle silently never ran, permanently, with cron itself reporting
+ * "success" the whole time (nothing to fail -- it just correctly determined
+ * "not my minute" every single tick). isDue() instead tracks elapsed time
+ * since the last real run, so it self-corrects regardless of how often (or
+ * how irregularly) the outer cron actually ticks, as long as it ticks at
+ * all. Naturally staggers installs across the hour too, since each one's
+ * cycle is anchored to whenever it first ran rather than a shared clock.
  */
 class ReportJob
 {
-    /** Cron polling granularity (see etc/crontab.xml); 5 minutes gives 12 offsets across the hour. */
-    private const JITTER_BUCKET_MINUTES = 5;
+    /** Roughly once per hour, matching the metrics spec's hourly evaluation cadence. */
+    private const MIN_INTERVAL_SECONDS = 3600;
 
     /**
      * @param ReportingService $reportingService
-     * @param Config $config
+     * @param ReportCycleStateRepository $reportCycleStateRepository
      * @param LoggerInterface $logger
      */
     public function __construct(
         private readonly ReportingService $reportingService,
-        private readonly Config $config,
+        private readonly ReportCycleStateRepository $reportCycleStateRepository,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -52,15 +66,15 @@ class ReportJob
 
     /**
      * The evaluate-and-submit logic, with an injectable "now" so tests can
-     * assert the jitter guard deterministically. Not the method Magento's
-     * cron dispatcher calls -- see execute().
+     * assert the elapsed-time guard deterministically. Not the method
+     * Magento's cron dispatcher calls -- see execute().
      *
      * @param \DateTimeImmutable $now
      * @return void
      */
     public function executeAt(\DateTimeImmutable $now): void
     {
-        if (!$this->isMyJitterMinute($now)) {
+        if (!$this->isDue($now)) {
             return;
         }
 
@@ -68,8 +82,13 @@ class ReportJob
 
         if (!$outcome['ran']) {
             // Not configured or disabled: ordinary states, not worth a log line every tick.
+            // Deliberately does NOT record a run -- the moment this install becomes
+            // configured/enabled, the next tick must treat it as never-run, not
+            // wait out the rest of an interval that was never really running.
             return;
         }
+
+        $this->reportCycleStateRepository->save($now);
 
         if ($outcome['expiredBufferedCount'] > 0) {
             // Discarded past the platform's report-age horizon, not delivered; distinct
@@ -138,41 +157,21 @@ class ReportJob
     }
 
     /**
-     * Whether $now falls in this install's own jitter bucket. Compares buckets,
-     * not the exact scheduled minute: Magento runs a due job whenever cron:run
-     * next reaches it, often a minute or more late, which an equality check
-     * would silently skip the whole hour for.
+     * Whether at least MIN_INTERVAL_SECONDS has passed since the real cycle
+     * last ran -- or it has never run at all, so a freshly-configured
+     * install doesn't wait out an interval that never actually started.
      *
      * @param \DateTimeImmutable $now
      * @return bool
      */
-    private function isMyJitterMinute(\DateTimeImmutable $now): bool
+    private function isDue(\DateTimeImmutable $now): bool
     {
-        $currentBucket = intdiv((int) $now->format('i'), self::JITTER_BUCKET_MINUTES) * self::JITTER_BUCKET_MINUTES;
+        $lastRunAt = $this->reportCycleStateRepository->get()->lastRunAt;
 
-        return $currentBucket === $this->jitterOffsetMinutes();
-    }
-
-    /**
-     * A deterministic per-install offset derived from the already-unique API
-     * key, so installs spread across the hour with no new persisted state.
-     * Hashing a stable value matters: a fresh random pick per tick would rarely
-     * hit the same bucket twice and could skip an entire hour. Falls back to 0
-     * when unconfigured, harmless since ReportingService::run() no-ops there.
-     *
-     * @return int
-     */
-    private function jitterOffsetMinutes(): int
-    {
-        $apiKey = $this->config->apiKey();
-
-        if ($apiKey === null || $apiKey === '') {
-            return 0;
+        if ($lastRunAt === null) {
+            return true;
         }
 
-        $bucketCount = intdiv(60, self::JITTER_BUCKET_MINUTES);
-        $bucket = hexdec(substr(hash('sha256', $apiKey), 0, 8)) % $bucketCount;
-
-        return $bucket * self::JITTER_BUCKET_MINUTES;
+        return ($now->getTimestamp() - $lastRunAt->getTimestamp()) >= self::MIN_INTERVAL_SECONDS;
     }
 }
