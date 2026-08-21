@@ -21,10 +21,11 @@ class ConnectorVersionReader
     private const PACKAGE_NAME = 'php4u/module-watchtower-m2-connector';
 
     /**
-     * This module's own version, e.g. "1.1.0", or null if this isn't a real
-     * Composer-managed install (a plain directory copy under app/code with
-     * no vendor/composer metadata) -- callers must treat that as "unknown",
-     * never as "up to date" or "outdated".
+     * This module's own version, e.g. "1.1.0" (never "v1.1.0" -- see below),
+     * or null if this isn't a real Composer-managed install (a plain
+     * directory copy under app/code with no vendor/composer metadata) --
+     * callers must treat that as "unknown", never as "up to date" or
+     * "outdated".
      *
      * @return string|null
      */
@@ -34,6 +35,11 @@ class ConnectorVersionReader
             return null;
         }
 
-        return InstalledVersions::getPrettyVersion(self::PACKAGE_NAME);
+        $version = InstalledVersions::getPrettyVersion(self::PACKAGE_NAME);
+
+        // Strip the "v" our own tags carry (Composer keeps it verbatim) --
+        // left in, version_compare() ranks it below a real release, so
+        // every install would read as "below minimum" regardless of version.
+        return $version !== null ? preg_replace('/^v/i', '', $version) : null;
     }
 }

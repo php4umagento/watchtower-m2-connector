@@ -5,6 +5,23 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.8.0] - 2026-08-21
+
+`ConnectorVersionReader::version()` now strips the leading "v" this
+module's own git tags carry (Composer's `getPrettyVersion()` preserves it
+verbatim, e.g. "v1.7.0") before returning it. Left in place, PHP's
+`version_compare()` treats an unrecognized leading "v" as ranking BELOW a
+normal release -- confirmed directly:
+`version_compare('v1.7.0', '1.6.0', '<')` is `true` -- so
+`ConnectorVersionCheckService::isBelow()` would have judged every install
+"below minimum_version" against the platform's bare-number
+`minimum_version`/`latest_version` (Filament-enforced format), regardless
+of how current the installed version actually was, and self-disabled it.
+Also fixes a cosmetic side effect of the same root cause: both
+`bin/magento watchtower:status` and the admin Diagnostics page already
+prepend their own literal "v" before displaying this value, which is why
+they were showing "vv1.5.0" instead of "v1.5.0".
+
 ## [1.7.0] - 2026-08-21
 
 Replaces `Cron\ReportJob`'s per-install "jitter minute" guard with an

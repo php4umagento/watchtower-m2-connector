@@ -32,4 +32,16 @@ class ConnectorVersionReaderTest extends TestCase
         self::assertNotNull($version, 'This test only runs from within a real Composer install of this package.');
         self::assertNotSame('', $version);
     }
+
+    /**
+     * A leading "v" makes version_compare() rank the whole string below a
+     * normal release, which would judge every install "below minimum".
+     */
+    public function testStripsTheLeadingVSoItNeverBreaksVersionCompareAgainstThePlatformsBareFormat(): void
+    {
+        $version = (new ConnectorVersionReader())->version();
+
+        self::assertNotNull($version);
+        self::assertDoesNotMatchRegularExpression('/^v/i', $version);
+    }
 }
