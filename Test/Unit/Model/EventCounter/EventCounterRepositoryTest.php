@@ -193,6 +193,52 @@ class EventCounterRepositoryTest extends TestCase
         self::assertSame([['hour_bucket >= ?', '2026-08-12 15:00:00']], $seenWhere);
     }
 
+    public function testPruneDeletesRowsPastRetentionInBothTablesAndReportsCounts(): void
+    {
+        $deletedCalls = [];
+
+        $connection = $this->createMock(AdapterInterface::class);
+        $connection->expects(self::exactly(2))
+            ->method('delete')
+            ->willReturnCallback(function (string $table, array $where) use (&$deletedCalls) {
+                $deletedCalls[] = [$table, $where];
+
+                return $table === 'watchtower_event_counter' ? 12 : 4;
+            });
+
+        $resourceConnection = $this->createStub(ResourceConnection::class);
+        $resourceConnection->method('getConnection')->willReturn($connection);
+        $resourceConnection->method('getTableName')->willReturnArgument(0);
+
+        $now = new \DateTimeImmutable('2026-08-13T15:00:00+00:00');
+        $result = (new EventCounterRepository($resourceConnection))->prune($now);
+
+        $expectedCutoff = $now->modify('-90 days')->format('Y-m-d H:i:s');
+
+        self::assertSame(12, $result->counterRowsPruned);
+        self::assertSame(4, $result->dropCounterRowsPruned);
+
+        self::assertSame(['watchtower_event_counter', ['hour_bucket < ?' => $expectedCutoff]], $deletedCalls[0]);
+        self::assertSame(['watchtower_event_drop_counter', ['hour_bucket < ?' => $expectedCutoff]], $deletedCalls[1]);
+    }
+
+    public function testPruneReturnsZeroesWhenNothingIsPastRetention(): void
+    {
+        $connection = $this->createStub(AdapterInterface::class);
+        $connection->method('delete')->willReturn(0);
+
+        $resourceConnection = $this->createStub(ResourceConnection::class);
+        $resourceConnection->method('getConnection')->willReturn($connection);
+        $resourceConnection->method('getTableName')->willReturnArgument(0);
+
+        $result = (new EventCounterRepository($resourceConnection))->prune(
+            new \DateTimeImmutable('2026-08-13T15:00:00+00:00')
+        );
+
+        self::assertSame(0, $result->counterRowsPruned);
+        self::assertSame(0, $result->dropCounterRowsPruned);
+    }
+
     private function isAccumulatingCountExpression(array $fields): bool
     {
         if (!isset($fields['count']) || !$fields['count'] instanceof \Zend_Db_Expr) {

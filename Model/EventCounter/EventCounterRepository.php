@@ -28,6 +28,16 @@ class EventCounterRepository
     private const DROP_COUNTER_TABLE = 'watchtower_event_drop_counter';
 
     /**
+     * Matches RollupRepository::HOURLY_RETENTION_DAYS: nothing here reads
+     * further back than the 24-hour diagnostic window
+     * (totalDroppedInLast24Hours()), so there is no seasonal-lookback
+     * requirement pulling this any higher, but 90 days keeps a comfortable
+     * margin for ad-hoc debugging without letting either table grow
+     * unbounded.
+     */
+    public const RETENTION_DAYS = 90;
+
+    /**
      * @param ResourceConnection $resourceConnection
      */
     public function __construct(
@@ -158,6 +168,31 @@ class EventCounterRepository
     }
 
     /**
+     * Deletes rows in both counter tables whose hour_bucket is past RETENTION_DAYS.
+     *
+     * Unlike RollupRepository::rollupAndPrune(), there is no daily table to
+     * roll aged rows into first -- these are already the coarsest form
+     * either counter is ever kept in, so pruning is a single unconditional
+     * delete per table.
+     *
+     * @param \DateTimeImmutable $now
+     * @return EventCounterPruneResult
+     */
+    public function prune(\DateTimeImmutable $now): EventCounterPruneResult
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $cutoff = $this->utcDate($now, -self::RETENTION_DAYS);
+
+        $counterTable = $this->resourceConnection->getTableName(self::COUNTER_TABLE);
+        $dropCounterTable = $this->resourceConnection->getTableName(self::DROP_COUNTER_TABLE);
+
+        $counterRowsPruned = (int) $connection->delete($counterTable, ['hour_bucket < ?' => $cutoff]);
+        $dropCounterRowsPruned = (int) $connection->delete($dropCounterTable, ['hour_bucket < ?' => $cutoff]);
+
+        return new EventCounterPruneResult($counterRowsPruned, $dropCounterRowsPruned);
+    }
+
+    /**
      * Formats an instant as its UTC top-of-hour string, the granularity both counter tables store.
      *
      * @param \DateTimeImmutable $dateTime
@@ -166,5 +201,19 @@ class EventCounterRepository
     private function formatUtcHour(\DateTimeImmutable $dateTime): string
     {
         return $dateTime->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:00:00');
+    }
+
+    /**
+     * Formats an instant, offset by a number of days, as a UTC date/time string.
+     *
+     * @param \DateTimeImmutable $dateTime
+     * @param int $offsetDays positive or negative number of days to offset by
+     * @return string
+     */
+    private function utcDate(\DateTimeImmutable $dateTime, int $offsetDays): string
+    {
+        return $dateTime->setTimezone(new \DateTimeZone('UTC'))
+            ->modify(sprintf('%+d days', $offsetDays))
+            ->format('Y-m-d H:i:s');
     }
 }

@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © 2026 Watchtower. All rights reserved.
+ * Licensed under the Business Source License 1.1 (BUSL-1.1). See LICENSE.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Cron:etc/cron_groups.xsd">
+    <group id="watchtower">
+        <!--
+            Same generate/ahead/lifetime numbers Magento's own "default"
+            group ships with: this group only exists to isolate
+            watchtower_* jobs from core's default-group queue via
+            use_separate_process below, not to change their timing. A
+            merchant's crontab virtually always invokes bin/magento
+            cron:run with no group option at all, which runs every group
+            found in the merged crontab.xml, so moving jobs into this
+            group needs no merchant-side cron changes to keep firing.
+        -->
+        <schedule_generate_every>15</schedule_generate_every>
+        <schedule_ahead_for>20</schedule_ahead_for>
+        <schedule_lifetime>15</schedule_lifetime>
+        <history_cleanup_every>10</history_cleanup_every>
+        <history_success_lifetime>60</history_success_lifetime>
+        <history_failure_lifetime>4320</history_failure_lifetime>
+        <!--
+            Forks its own process instead of running inline inside the
+            shared default-group cron:run invocation, so a slow/stuck core
+            job in default can no longer delay watchtower_report's
+            submission cadence, and vice versa.
+        -->
+        <use_separate_process>1</use_separate_process>
+    </group>
+</config>

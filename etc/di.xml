@@ -18,6 +18,9 @@
                 <item name="watchtowerRollupPrune" xsi:type="object">
                     Watchtower\Connector\Console\Command\RollupPruneCommand
                 </item>
+                <item name="watchtowerEventCounterPrune" xsi:type="object">
+                    Watchtower\Connector\Console\Command\EventCounterPruneCommand
+                </item>
                 <item name="watchtowerCoverage" xsi:type="object">
                     Watchtower\Connector\Console\Command\CoverageCommand
                 </item>
