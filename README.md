@@ -63,8 +63,11 @@ Go to **Stores > Configuration > Watchtower > Connection**:
 | Field | What it's for |
 |---|---|
 | **Watchtower Base URL** | The base URL of your Watchtower platform instance. Pre-filled with the live Watchtower platform; only change this for a custom deployment. |
-| **Install API Key** | The install-scoped API key generated for this install on the Watchtower projects page. Stored encrypted. |
+| **Install API Key** | The install-scoped API key generated for this install on the [Watchtower projects page](https://watchtower-commerce.com/docs/connecting-magento-2/add-the-magento-2-connector). Stored encrypted. See [where to find and rotate your API key](https://watchtower-commerce.com/docs/connecting-magento-2/where-to-find-and-rotate-your-api-key) if you already have a project. |
 | **Enabled** | Master on/off switch. Disabling stops the connector from syncing, evaluating, or submitting anything — without discarding your saved configuration. |
+
+Don't have a Watchtower project yet? See [how to create a project and get an
+API key](https://watchtower-commerce.com/docs/connecting-magento-2/add-the-magento-2-connector).
 
 After saving, click **Test Connection** on the same page to confirm the URL
 and key are valid before waiting for the next scheduled cron cycle. The same

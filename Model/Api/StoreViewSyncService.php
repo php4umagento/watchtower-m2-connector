@@ -15,6 +15,7 @@ use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\Environment\MagentoVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
+use Watchtower\Connector\Model\StoreView\IgnoredDomainStateRepository;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 
 /**
@@ -36,6 +37,7 @@ class StoreViewSyncService
      * @param ConnectorVersionReader $connectorVersionReader
      * @param EnvironmentStateRepository $environmentStateRepository
      * @param ConnectorVersionStateRepository $connectorVersionStateRepository
+     * @param IgnoredDomainStateRepository $ignoredDomainStateRepository
      * @param LoggerInterface $logger
      */
     public function __construct(
@@ -46,6 +48,7 @@ class StoreViewSyncService
         private readonly ConnectorVersionReader $connectorVersionReader,
         private readonly EnvironmentStateRepository $environmentStateRepository,
         private readonly ConnectorVersionStateRepository $connectorVersionStateRepository,
+        private readonly IgnoredDomainStateRepository $ignoredDomainStateRepository,
         private readonly LoggerInterface $logger
     ) {
     }
@@ -143,12 +146,36 @@ class StoreViewSyncService
             new \DateTimeImmutable(),
         );
 
+        $this->saveIgnoredDomainState($rejected);
+
         return new SyncResult(
             succeeded: true,
             synced: $synced,
             created: $created,
             rejected: $rejected,
             magentoEol: $magentoEol,
+        );
+    }
+
+    /**
+     * Persists this sync's ignored-local-domain outcome (PRD FR28-30) for
+     * the admin notice -- including a zero count, so a resolved local domain
+     * clears the notice on the next sync.
+     *
+     * @param array<int,array{code:string,reason:string,reason_code?:string}> $rejected
+     * @return void
+     */
+    private function saveIgnoredDomainState(array $rejected): void
+    {
+        $ignored = array_values(array_filter(
+            $rejected,
+            static fn (array $entry): bool => ($entry['reason_code'] ?? null) === 'ignored_local_domain'
+        ));
+
+        $this->ignoredDomainStateRepository->save(
+            count($ignored),
+            $ignored[0]['code'] ?? null,
+            new \DateTimeImmutable(),
         );
     }
 

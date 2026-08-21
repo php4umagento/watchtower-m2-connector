@@ -20,6 +20,7 @@ use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\Environment\MagentoVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
+use Watchtower\Connector\Model\StoreView\IgnoredDomainStateRepository;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 use Watchtower\Connector\Test\Unit\StoreStubTrait;
 
@@ -148,6 +149,7 @@ class StoreViewSyncServiceTest extends TestCase
             $this->connectorVersionReaderStub(),
             $environmentStateRepository,
             $this->connectorVersionStateRepositoryStub(),
+            $this->createStub(IgnoredDomainStateRepository::class),
             $this->createStub(LoggerInterface::class)
         );
         $service->sync('https://watchtower.test', 'a-real-api-key');
@@ -170,6 +172,9 @@ class StoreViewSyncServiceTest extends TestCase
         $environmentStateRepository = $this->createMock(EnvironmentStateRepository::class);
         $environmentStateRepository->expects(self::never())->method('save');
 
+        $ignoredDomainStateRepository = $this->createMock(IgnoredDomainStateRepository::class);
+        $ignoredDomainStateRepository->expects(self::never())->method('save');
+
         $organizationStateRepository = $this->createStub(OrganizationStateRepository::class);
         $organizationStateRepository->method('isPaused')->willReturn(false);
 
@@ -181,6 +186,7 @@ class StoreViewSyncServiceTest extends TestCase
             $this->connectorVersionReaderStub(),
             $environmentStateRepository,
             $this->connectorVersionStateRepositoryStub(),
+            $ignoredDomainStateRepository,
             $this->createStub(LoggerInterface::class)
         );
         $result = $service->sync('https://watchtower.test', 'a-real-api-key');
@@ -326,6 +332,7 @@ class StoreViewSyncServiceTest extends TestCase
             $this->connectorVersionReaderStub(),
             $this->createStub(EnvironmentStateRepository::class),
             $this->connectorVersionStateRepositoryStub(),
+            $this->createStub(IgnoredDomainStateRepository::class),
             $logger
         );
         $service->sync('https://watchtower.test', 'a-real-secret-key');
@@ -369,6 +376,97 @@ class StoreViewSyncServiceTest extends TestCase
         );
     }
 
+    public function testASuccessfulSyncWithNoIgnoredLocalDomainRejectionsClearsTheState(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $client = $this->createStub(Client::class);
+        $client->method('post')->willReturn(new Response(200, [
+            'synced' => ['default'],
+            'created' => [],
+            'rejected' => [],
+        ]));
+
+        $ignoredDomainStateRepository = $this->createMock(IgnoredDomainStateRepository::class);
+        $ignoredDomainStateRepository->expects(self::once())->method('save')->with(0, null, self::isInstanceOf(
+            \DateTimeImmutable::class
+        ));
+
+        $this->service($storeManager, $client, ignoredDomainStateRepository: $ignoredDomainStateRepository)
+            ->sync('https://watchtower.test', 'a-real-api-key');
+    }
+
+    /**
+     * PRD FR29: a rejection carrying reason_code ignored_local_domain must
+     * be recorded for the admin notice, keyed by count and one example
+     * code -- and must NOT be logged/treated as any kind of sync error.
+     */
+    public function testASuccessfulSyncWithAnIgnoredLocalDomainRejectionSavesTheCountAndAnExample(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $client = $this->createStub(Client::class);
+        $client->method('post')->willReturn(new Response(200, [
+            'synced' => [],
+            'created' => [],
+            'rejected' => [
+                [
+                    'code' => 'default',
+                    'reason' => "The reported URL looks like a local or development environment.",
+                    'reason_code' => 'ignored_local_domain',
+                ],
+            ],
+        ]));
+
+        $ignoredDomainStateRepository = $this->createMock(IgnoredDomainStateRepository::class);
+        $ignoredDomainStateRepository->expects(self::once())->method('save')->with(1, 'default', self::isInstanceOf(
+            \DateTimeImmutable::class
+        ));
+
+        $this->service($storeManager, $client, ignoredDomainStateRepository: $ignoredDomainStateRepository)
+            ->sync('https://watchtower.test', 'a-real-api-key');
+    }
+
+    /**
+     * Only entries carrying THIS reason_code count -- a rejection for any
+     * other reason (allowance exceeded, held host mismatch, no reason_code
+     * at all) must not be misread as a local domain.
+     */
+    public function testOnlyRejectionsCarryingTheIgnoredLocalDomainReasonCodeAreCounted(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $client = $this->createStub(Client::class);
+        $client->method('post')->willReturn(new Response(200, [
+            'synced' => [],
+            'created' => [],
+            'rejected' => [
+                ['code' => 'sv1', 'reason' => 'store view allowance exceeded for this install'],
+                [
+                    'code' => 'sv2',
+                    'reason' => "The reported URL's host doesn't match this shop's known host.",
+                    'reason_code' => 'host_mismatch_held',
+                ],
+                [
+                    'code' => 'sv3',
+                    'reason' => "The reported URL looks like a local or development environment.",
+                    'reason_code' => 'ignored_local_domain',
+                ],
+            ],
+        ]));
+
+        $ignoredDomainStateRepository = $this->createMock(IgnoredDomainStateRepository::class);
+        $ignoredDomainStateRepository->expects(self::once())->method('save')->with(1, 'sv3', self::isInstanceOf(
+            \DateTimeImmutable::class
+        ));
+
+        $this->service($storeManager, $client, ignoredDomainStateRepository: $ignoredDomainStateRepository)
+            ->sync('https://watchtower.test', 'a-real-api-key');
+    }
+
     private function pausedStub(bool $paused): OrganizationStateRepository
     {
         $repository = $this->createStub(OrganizationStateRepository::class);
@@ -381,7 +479,8 @@ class StoreViewSyncServiceTest extends TestCase
         StoreManagerInterface $storeManager,
         Client $client,
         ?OrganizationStateRepository $organizationStateRepository = null,
-        ?ConnectorVersionStateRepository $connectorVersionStateRepository = null
+        ?ConnectorVersionStateRepository $connectorVersionStateRepository = null,
+        ?IgnoredDomainStateRepository $ignoredDomainStateRepository = null
     ): StoreViewSyncService {
         if ($organizationStateRepository === null) {
             $organizationStateRepository = $this->createStub(OrganizationStateRepository::class);
@@ -396,6 +495,7 @@ class StoreViewSyncServiceTest extends TestCase
             $this->connectorVersionReaderStub(),
             $this->createStub(EnvironmentStateRepository::class),
             $connectorVersionStateRepository ?? $this->connectorVersionStateRepositoryStub(),
+            $ignoredDomainStateRepository ?? $this->createStub(IgnoredDomainStateRepository::class),
             $this->createStub(LoggerInterface::class)
         );
     }

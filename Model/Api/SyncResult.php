@@ -20,7 +20,9 @@ class SyncResult
      * @param bool $succeeded
      * @param string[] $synced
      * @param string[] $created
-     * @param array<int,array{code:string,reason:string}> $rejected
+     * @param array<int,array{code:string,reason:string,reason_code?:string}> $rejected reason_code is only ever
+     *     present for reasons the platform has given a stable machine meaning to (PRD §5.9) -- currently just
+     *     "ignored_local_domain"; absent means "no special handling," never an error
      * @param string|null $errorMessage
      * @param MagentoEolInfo|null $magentoEol null when the platform couldn't determine EOL status
      *     (this request didn't report a Magento version/edition, or the platform's own lookup failed)

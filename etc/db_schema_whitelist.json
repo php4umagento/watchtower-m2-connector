@@ -201,5 +201,16 @@
         "constraint": {
             "PRIMARY": true
         }
+    },
+    "watchtower_ignored_domain_state": {
+        "column": {
+            "id": true,
+            "ignored_count": true,
+            "example_code": true,
+            "occurred_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
     }
 }

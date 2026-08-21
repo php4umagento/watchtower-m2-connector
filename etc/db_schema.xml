@@ -289,4 +289,16 @@
             <column name="id"/>
         </constraint>
     </table>
+    <table name="watchtower_ignored_domain_state" resource="default" engine="innodb"
+           comment="Last sync's ignored-local-domain outcome (PRD FR28-30), singleton row.">
+        <column xsi:type="smallint" name="id" unsigned="true" nullable="false" comment="Always 1, singleton row"/>
+        <column xsi:type="int" name="ignored_count" unsigned="true" nullable="false" default="0"
+                comment="Store views the last sync rejected with reason_code ignored_local_domain"/>
+        <column xsi:type="varchar" name="example_code" nullable="true" length="255"
+                comment="One rejected store view's code from the last sync, null when ignored_count is 0"/>
+        <column xsi:type="timestamp" name="occurred_at" nullable="true" comment="When the last sync ran"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="id"/>
+        </constraint>
+    </table>
 </schema>
