@@ -7,7 +7,12 @@
 -->
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Cron:etc/crontab.xsd">
-    <group id="default">
+    <!--
+        Own dedicated group (see etc/cron_groups.xml), not Magento's shared
+        "default" group: keeps these jobs from contending with core
+        Magento's own default-group cron queue/lock, and vice versa.
+    -->
+    <group id="watchtower">
         <!--
             Polled every 5 minutes, but Cron\ReportJob's own elapsed-time
             guard (see that class's docblock) makes the real evaluate-and-
@@ -43,6 +48,18 @@
         -->
         <job name="watchtower_rollup_prune" instance="Watchtower\Connector\Cron\RollupPruneJob" method="execute">
             <schedule>0 3 * * *</schedule>
+        </job>
+
+        <!--
+            Daily, offset from watchtower_rollup_prune's own 3am slot so the
+            two do not contend for the same minute. Unlike the rollup
+            tables, watchtower_event_counter and watchtower_event_drop_counter
+            have no daily table to roll into first, so this is a plain
+            delete-past-retention rather than a roll-then-prune.
+        -->
+        <job name="watchtower_event_counter_prune"
+             instance="Watchtower\Connector\Cron\EventCounterPruneJob" method="execute">
+            <schedule>15 3 * * *</schedule>
         </job>
     </group>
 </config>
