@@ -5,6 +5,15 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.8.1] - 2026-08-21
+
+Fixes invalid XML shipped in v1.7.0/v1.8.0: `etc/crontab.xml`'s comment
+for `watchtower_report` contained a literal `--`, which the XML spec
+forbids inside a comment body (only the opening `<!--`/closing `-->`
+delimiters may contain it). Reworded to avoid it; no other XML file in
+the module has the same issue (checked every `<!-- -->` block in every
+`.xml` file for a literal `--`, not just this one).
+
 ## [1.8.0] - 2026-08-21
 
 `ConnectorVersionReader::version()` now strips the leading "v" this

@@ -11,9 +11,9 @@
         <!--
             Polled every 5 minutes, but Cron\ReportJob's own elapsed-time
             guard (see that class's docblock) makes the real evaluate-and-
-            submit cycle actually run only roughly once per hour -- and,
-            unlike an exact wall-clock schedule, self-corrects regardless of
-            how often the host's own system cron actually invokes
+            submit cycle actually run only roughly once per hour. Unlike an
+            exact wall-clock schedule, it self-corrects regardless of how
+            often the host's own system cron actually invokes
             bin/magento cron:run, which is not guaranteed to match this
             schedule's own 5-minute granularity.
         -->
