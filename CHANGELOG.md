@@ -5,6 +5,23 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.6.0] - 2026-08-21
+
+Fixes a real-world first-install bug: saving Base URL, API Key, and Enabled
+together in one admin-form submission -- the normal way a merchant sets
+the module up for the first time -- silently skipped the on-enable sync
+entirely, with no error anywhere. `EnabledSyncTrigger` read those sibling
+fields via `ScopeConfigInterface`, which can still hold pre-save (null)
+values within the same request; `isConfigured()` then came back false and
+the sync was gated out before it ever ran. Fixed by calling
+`ReinitableConfigInterface::reinit()` before checking `isConfigured()` --
+not a workaround, but the same call `Magento\Config\Model\Config::save()`
+itself makes right after its own save transaction commits, for this exact
+reason; ours now runs one step earlier, before that method reaches it.
+Until the scheduled `watchtower_sync`/`watchtower_report` cron jobs caught
+up (once daily / a jittered once-hourly window, respectively), an install
+hitting this looked like it was reporting nothing at all.
+
 ## [1.5.0] - 2026-08-21
 
 The platform now tags a sync rejection with `reason_code: ignored_local_domain`

@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace Watchtower\Connector\Test\Unit\Model\Config\Backend;
 
 use Magento\Framework\App\Cache\TypeListInterface;
+use Magento\Framework\App\Config\ReinitableConfigInterface;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Event\ManagerInterface;
 use Magento\Framework\Model\Context;
@@ -51,6 +52,48 @@ class EnabledSyncTriggerTest extends TestCase
         $model->afterSave();
     }
 
+    /**
+     * The bug this exists to prevent: a single admin-form save that sets
+     * base URL, API key, and enabled together for the first time must not
+     * read stale pre-save values -- reinit() has to run before isConfigured()
+     * (and therefore before sync()) is ever checked, not after.
+     */
+    public function testReinitsConfigBeforeCheckingIsConfiguredWhenJustEnabled(): void
+    {
+        $calls = [];
+
+        $reinitableConfig = $this->createMock(ReinitableConfigInterface::class);
+        $reinitableConfig->expects(self::once())->method('reinit')->willReturnCallback(
+            function () use (&$calls) {
+                $calls[] = 'reinit';
+            }
+        );
+
+        $watchtowerConfig = $this->createStub(Config::class);
+        $watchtowerConfig->method('isConfigured')->willReturnCallback(function () use (&$calls) {
+            $calls[] = 'isConfigured';
+
+            return true;
+        });
+        $watchtowerConfig->method('baseUrl')->willReturn('https://watchtower.test');
+        $watchtowerConfig->method('apiKey')->willReturn('a-real-api-key');
+
+        $storeViewSyncService = $this->createStub(StoreViewSyncService::class);
+        $storeViewSyncService->method('sync')->willReturn(new SyncResult(succeeded: true));
+
+        $model = $this->buildModel(
+            oldValue: null,
+            storeViewSyncService: $storeViewSyncService,
+            reinitableConfig: $reinitableConfig,
+            watchtowerConfig: $watchtowerConfig
+        );
+        $model->setPath('watchtower/general/enabled')->setValue('1');
+
+        $model->afterSave();
+
+        self::assertSame(['reinit', 'isConfigured'], $calls);
+    }
+
     public function testFiresSyncWhenTransitioningFromZeroToOne(): void
     {
         $storeViewSyncService = $this->createMock(StoreViewSyncService::class);
@@ -72,7 +115,14 @@ class EnabledSyncTriggerTest extends TestCase
         $storeViewSyncService = $this->createMock(StoreViewSyncService::class);
         $storeViewSyncService->expects(self::never())->method('sync');
 
-        $model = $this->buildModel(oldValue: '1', storeViewSyncService: $storeViewSyncService);
+        $reinitableConfig = $this->createMock(ReinitableConfigInterface::class);
+        $reinitableConfig->expects(self::never())->method('reinit');
+
+        $model = $this->buildModel(
+            oldValue: '1',
+            storeViewSyncService: $storeViewSyncService,
+            reinitableConfig: $reinitableConfig
+        );
         $model->setPath('watchtower/general/enabled')->setValue('1');
 
         $model->afterSave();
@@ -123,7 +173,9 @@ class EnabledSyncTriggerTest extends TestCase
         ?string $oldValue,
         StoreViewSyncService $storeViewSyncService,
         ?LoggerInterface $logger = null,
-        bool $isConfigured = true
+        bool $isConfigured = true,
+        ?ReinitableConfigInterface $reinitableConfig = null,
+        ?Config $watchtowerConfig = null
     ): EnabledSyncTrigger {
         $scopeConfig = $this->createStub(ScopeConfigInterface::class);
         $scopeConfig->method('getValue')->willReturn($oldValue);
@@ -132,10 +184,12 @@ class EnabledSyncTriggerTest extends TestCase
         $context = $this->createStub(Context::class);
         $context->method('getEventDispatcher')->willReturn($eventManager);
 
-        $watchtowerConfig = $this->createStub(Config::class);
-        $watchtowerConfig->method('isConfigured')->willReturn($isConfigured);
-        $watchtowerConfig->method('baseUrl')->willReturn('https://watchtower.test');
-        $watchtowerConfig->method('apiKey')->willReturn('a-real-api-key');
+        if ($watchtowerConfig === null) {
+            $watchtowerConfig = $this->createStub(Config::class);
+            $watchtowerConfig->method('isConfigured')->willReturn($isConfigured);
+            $watchtowerConfig->method('baseUrl')->willReturn('https://watchtower.test');
+            $watchtowerConfig->method('apiKey')->willReturn('a-real-api-key');
+        }
 
         $objectManager = new ObjectManagerHelper($this);
 
@@ -144,6 +198,7 @@ class EnabledSyncTriggerTest extends TestCase
             'registry' => $this->createStub(Registry::class),
             'config' => $scopeConfig,
             'cacheTypeList' => $this->createStub(TypeListInterface::class),
+            'reinitableConfig' => $reinitableConfig ?? $this->createStub(ReinitableConfigInterface::class),
             'watchtowerConfig' => $watchtowerConfig,
             'storeViewSyncService' => $storeViewSyncService,
             'logger' => $logger ?? $this->createStub(LoggerInterface::class),
