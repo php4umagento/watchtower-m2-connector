@@ -78,6 +78,7 @@
             "pending_status": true,
             "confirmed_status": true,
             "last_reported_reason": true,
+            "ensemble_driving_checks": true,
             "sequence_number": true,
             "updated_at": true
         },

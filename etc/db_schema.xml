@@ -174,6 +174,8 @@
                 comment="Last confirmed, reported status"/>
         <column xsi:type="varchar" name="last_reported_reason" nullable="true" length="20"
                 comment="Reason for the last reported status: heartbeat or transition"/>
+        <column xsi:type="varchar" name="ensemble_driving_checks" nullable="true" length="64"
+                comment="Comma-joined names of checks that drove the last raw classification"/>
         <column xsi:type="int" name="sequence_number" unsigned="true" nullable="false" default="1"
                 comment="Next sequence number for this store view and category"/>
         <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"

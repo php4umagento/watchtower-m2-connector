@@ -59,6 +59,8 @@ class DispersionStateRepository
             );
         }
 
+        $drivingChecks = $row['ensemble_driving_checks'] ?? null;
+
         return new DispersionState(
             storeViewId: $storeViewId,
             category: $category,
@@ -66,6 +68,7 @@ class DispersionStateRepository
             confirmedStatus: SignalStatus::tryFrom((string) $row['confirmed_status']),
             sequenceNumber: (int) $row['sequence_number'],
             lastReportedReason: ReportReason::tryFrom((string) ($row['last_reported_reason'] ?? '')),
+            ensembleDrivingChecks: $drivingChecks !== null && $drivingChecks !== '' ? explode(',', $drivingChecks) : [],
         );
     }
 
@@ -88,9 +91,18 @@ class DispersionStateRepository
                 'pending_status' => $state->pendingStatus?->value,
                 'confirmed_status' => $state->confirmedStatus?->value,
                 'last_reported_reason' => $state->lastReportedReason?->value,
+                'ensemble_driving_checks' => $state->ensembleDrivingChecks !== []
+                    ? implode(',', $state->ensembleDrivingChecks)
+                    : null,
                 'sequence_number' => $state->sequenceNumber,
             ],
-            ['pending_status', 'confirmed_status', 'last_reported_reason', 'sequence_number']
+            [
+                'pending_status',
+                'confirmed_status',
+                'last_reported_reason',
+                'ensemble_driving_checks',
+                'sequence_number',
+            ]
         );
     }
 }

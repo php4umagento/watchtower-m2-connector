@@ -168,6 +168,7 @@ class DiagnosticsSnapshotProvider
                         $category,
                         $evaluatedHour
                     ),
+                    ensembleDrivingChecks: $state->ensembleDrivingChecks,
                 );
             }
 

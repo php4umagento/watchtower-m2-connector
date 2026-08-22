@@ -97,6 +97,20 @@ class Overview extends Template
     }
 
     /**
+     * Which named checks drove a signal's last raw classification, rendered
+     * as e.g. "dispersion, seasonal", or an empty string when there is
+     * nothing to attribute (cron_health/integration_health, or a rate-based
+     * signal on the inter-arrival/low-volume path).
+     *
+     * @param SignalSnapshot $signal
+     * @return string
+     */
+    public function ensembleAttributionLabel(SignalSnapshot $signal): string
+    {
+        return implode(', ', $signal->ensembleDrivingChecks);
+    }
+
+    /**
      * A signal's estimated detection latency for a full outage, rendered as
      * e.g. "~19h (low-volume mode)", or an empty string when the signal
      * isn't in Low-Volume Signal Mode -- most signals never show this.

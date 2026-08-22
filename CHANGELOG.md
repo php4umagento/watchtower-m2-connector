@@ -5,6 +5,14 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.16.0] - 2026-08-22
+
+The admin diagnostics page and `watchtower:status` now show which named
+checks (dispersion, seasonal, trend) actually drove a rate-based signal's
+last classification, for a status transition produced by the ensemble
+combiner. Adds an `ensemble_driving_checks` column to
+`watchtower_dispersion_state`; run `setup:upgrade`.
+
 ## [1.15.0] - 2026-08-22
 
 The admin diagnostics page and `watchtower:status` now show the reason
