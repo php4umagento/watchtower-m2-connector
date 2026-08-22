@@ -5,6 +5,13 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.18.0] - 2026-08-22
+
+The connector now reports its own version on every metrics submission
+(roughly hourly), not just the once-daily sync. The platform's admin
+previously showed a connector version up to a day stale after a mid-day
+upgrade.
+
 ## [1.17.0] - 2026-08-22
 
 The admin diagnostics page and `watchtower:status` now show per-signal
