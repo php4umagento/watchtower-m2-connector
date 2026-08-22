@@ -5,6 +5,13 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.18.1] - 2026-08-22
+
+Fixes every outbound API call 401ing with "Missing API key" on Magento
+2.4.7 and older: Magento's own Curl adapter silently dropped the
+Authorization header on those versions. The client now uses Laminas's
+own Curl adapter instead, which has always formatted headers correctly.
+
 ## [1.18.0] - 2026-08-22
 
 The connector now reports its own version on every metrics submission
