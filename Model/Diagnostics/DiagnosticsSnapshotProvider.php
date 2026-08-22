@@ -18,6 +18,7 @@ use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
 use Watchtower\Connector\Model\HealthState\HealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
+use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
@@ -45,6 +46,8 @@ class DiagnosticsSnapshotProvider
      * @param EventCounterRepository $eventCounterRepository
      * @param HealthStateRepository $healthStateRepository
      * @param DispersionStateRepository $dispersionStateRepository
+     * @param DispersionEvaluator $dispersionEvaluator read-only detection-latency estimate only --
+     *     never invoke evaluate() from here, it mutates confirmed/pending state as a side effect
      * @param IntegrationHealthStateRepository $integrationHealthStateRepository
      * @param IntegrationHealthConfigRepository $integrationHealthConfigRepository
      * @param LiveStoreViewResolver $liveStoreViewResolver
@@ -59,6 +62,7 @@ class DiagnosticsSnapshotProvider
         private readonly EventCounterRepository $eventCounterRepository,
         private readonly HealthStateRepository $healthStateRepository,
         private readonly DispersionStateRepository $dispersionStateRepository,
+        private readonly DispersionEvaluator $dispersionEvaluator,
         private readonly IntegrationHealthStateRepository $integrationHealthStateRepository,
         private readonly IntegrationHealthConfigRepository $integrationHealthConfigRepository,
         private readonly LiveStoreViewResolver $liveStoreViewResolver,
@@ -120,7 +124,7 @@ class DiagnosticsSnapshotProvider
             bufferedReportCount: $this->reportBufferRepository->bufferedCount(),
             droppedEventCountLast24Hours: $this->eventCounterRepository->totalDroppedInLast24Hours($now),
             cronHealth: $cronHealth,
-            storeViews: $this->storeViewSnapshots(),
+            storeViews: $this->storeViewSnapshots($now),
             recentSubmissionOutcomes: $this->submissionOutcomeRepository->recent($recentOutcomeLimit),
             environment: $this->environmentStateRepository->get(),
             connectorVersion: $this->connectorVersionStateRepository->get(),
@@ -130,10 +134,21 @@ class DiagnosticsSnapshotProvider
     /**
      * Assembles each live store view's per-category signal snapshots.
      *
+     * @param \DateTimeImmutable $now
      * @return StoreViewSnapshot[]
      */
-    private function storeViewSnapshots(): array
+    private function storeViewSnapshots(\DateTimeImmutable $now): array
     {
+        // Same last-COMPLETE-hour convention as ReportingService::liveStoreViewReports() --
+        // DispersionEvaluator's bucket lookups compare full hours, so a
+        // still-in-progress current hour would understate the latest sample.
+        $currentHourStart = \DateTimeImmutable::createFromFormat(
+            'Y-m-d H:i:s',
+            $now->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:00:00'),
+            new \DateTimeZone('UTC')
+        );
+        $evaluatedHour = $currentHourStart->modify('-1 hour');
+
         $snapshots = [];
 
         foreach ($this->liveStoreViewResolver->all() as $store) {
@@ -146,6 +161,11 @@ class DiagnosticsSnapshotProvider
                     category: $category,
                     status: $state->confirmedStatus,
                     sequenceNumber: $state->sequenceNumber,
+                    estimatedDetectionLatencyHours: $this->dispersionEvaluator->estimatedDetectionLatencyHours(
+                        $storeViewId,
+                        $category,
+                        $evaluatedHour
+                    ),
                 );
             }
 

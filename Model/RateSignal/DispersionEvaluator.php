@@ -379,6 +379,63 @@ class DispersionEvaluator
     }
 
     /**
+     * For a signal currently in Low-Volume Signal Mode, the
+     * store's own estimated detection latency for a full outage -- the
+     * number of silent hours its own historical gap distribution would need
+     * to exceed before interArrivalRawStatus() reports SEVERE_DROP. Null
+     * when the signal isn't in Low-Volume Signal Mode (its median clears
+     * VOLUME_FLOOR) or doesn't have enough calibrated history to estimate
+     * one -- mirrors interArrivalRawStatus()'s own gating exactly, so a
+     * signal reporting INSUFFICIENT_DATA from evaluate() always reports a
+     * null latency here too, never a number for data that doesn't exist.
+     * Read-only: unlike evaluate(), never touches confirmed/pending state,
+     * so it's safe to call once per diagnostics page render.
+     *
+     * @param int $storeViewId
+     * @param string $category
+     * @param \DateTimeImmutable $evaluatedHour top-of-hour instant to estimate as of
+     * @return float|null hours of silence that would trigger SEVERE_DROP, or null
+     */
+    public function estimatedDetectionLatencyHours(
+        int $storeViewId,
+        string $category,
+        \DateTimeImmutable $evaluatedHour
+    ): ?float {
+        $samples = $this->historicalSamples($storeViewId, $category, $evaluatedHour);
+
+        if (count($samples) >= self::MIN_HISTORICAL_SAMPLES) {
+            $values = array_map(static fn (HourlyCountSample $sample): int => $sample->count, $samples);
+
+            if ($this->median($values) >= self::VOLUME_FLOOR) {
+                return null;
+            }
+        }
+
+        $series = $this->rollupRepository->allHourlyCountsInWindow(
+            $storeViewId,
+            $category,
+            self::LOW_VOLUME_LOOKBACK_WEEKS,
+            $evaluatedHour
+        );
+
+        $gaps = $this->gapCalculator->compute($series, $evaluatedHour);
+
+        $distribution = count($gaps->bucketGapDistribution) >= self::MIN_HISTORICAL_SAMPLES
+            ? $gaps->bucketGapDistribution
+            : $gaps->storeWideGapDistribution;
+
+        if (count($distribution) < self::MIN_HISTORICAL_SAMPLES) {
+            return null;
+        }
+
+        if ($this->estimatedDailyVolume($series, $evaluatedHour) < self::MIN_VALIDATED_DAILY_VOLUME) {
+            return null;
+        }
+
+        return $this->percentile($distribution, $this->lowVolumeThresholdPercentile($series, $evaluatedHour));
+    }
+
+    /**
      * Low-Volume Signal Mode: below VOLUME_FLOOR, a per-hour count isn't a
      * meaningful measurement on its own, so silence is checked against the
      * bucket's own historical inter-arrival distribution, and any nonzero

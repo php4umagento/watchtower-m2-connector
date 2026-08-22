@@ -213,6 +213,7 @@ $versionState = $snapshot->connectorVersion;
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Signal')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Status')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Sequence Number')) ?></th>
+                            <th class="data-grid-th"><?= $escaper->escapeHtml(__('Outage Detection')) ?></th>
                         </tr>
                         </thead>
                         <tbody>
@@ -222,6 +223,9 @@ $versionState = $snapshot->connectorVersion;
                                 <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($signal)) ?></td>
                                 <td class="data-grid-td">
                                     <?= $escaper->escapeHtml((string) $signal->sequenceNumber) ?>
+                                </td>
+                                <td class="data-grid-td">
+                                    <?= $escaper->escapeHtml($block->detectionLatencyLabel($signal)) ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

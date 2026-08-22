@@ -30,6 +30,7 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfig;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthState;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
+use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionState;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
@@ -38,7 +39,7 @@ use Watchtower\Connector\Test\Unit\StoreStubTrait;
 
 /**
  * Proves DiagnosticsSnapshotProvider assembles a full DiagnosticsSnapshot
- * from its 10 read-only sources -- this is the shared layer both
+ * from its 11 read-only sources -- this is the shared layer both
  * watchtower:status and the admin diagnostics page render, so its own
  * assembly logic is tested independently of either presentation.
  */
@@ -165,6 +166,56 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             ],
             array_map(static fn ($signal) => $signal->category, $storeView->signals)
         );
+    }
+
+    /**
+     * The per-signal detection-latency estimate comes from DispersionEvaluator,
+     * a separate read-only query from the confirmed status/sequence read off
+     * DispersionStateRepository -- this proves the two get threaded together
+     * onto the same SignalSnapshot, keyed by category.
+     */
+    public function testDetectionLatencyIsThreadedOntoTheMatchingSignalSnapshot(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $dispersionStateRepository = $this->createStub(DispersionStateRepository::class);
+        $dispersionStateRepository->method('get')->willReturnCallback(
+            fn (int $storeViewId, string $category) => new DispersionState(
+                storeViewId: $storeViewId,
+                category: $category,
+                pendingStatus: null,
+                confirmedStatus: SignalStatus::Normal,
+                sequenceNumber: 5,
+            )
+        );
+
+        $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
+        $dispersionEvaluator->method('estimatedDetectionLatencyHours')->willReturnCallback(
+            fn (int $storeViewId, string $category) => $category === HistorySeeder::CATEGORY_BASKET_QUOTE
+                ? 19.0
+                : null
+        );
+
+        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
+        $integrationHealthConfigRepository->method('get')->willReturn(null);
+
+        $snapshot = $this->provider(
+            storeManager: $storeManager,
+            dispersionStateRepository: $dispersionStateRepository,
+            dispersionEvaluator: $dispersionEvaluator,
+            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+        )->snapshot($this->now());
+
+        $signals = $snapshot->storeViews[0]->signals;
+        $byCategory = [];
+        foreach ($signals as $signal) {
+            $byCategory[$signal->category] = $signal->estimatedDetectionLatencyHours;
+        }
+
+        self::assertSame(19.0, $byCategory[HistorySeeder::CATEGORY_BASKET_QUOTE]);
+        self::assertNull($byCategory[HistorySeeder::CATEGORY_CHECKOUT]);
+        self::assertNull($byCategory[HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT]);
     }
 
     /**
@@ -312,6 +363,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         ?EventCounterRepository $eventCounterRepository = null,
         ?HealthStateRepository $healthStateRepository = null,
         ?DispersionStateRepository $dispersionStateRepository = null,
+        ?DispersionEvaluator $dispersionEvaluator = null,
         ?IntegrationHealthStateRepository $integrationHealthStateRepository = null,
         ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
         ?StoreManagerInterface $storeManager = null,
@@ -354,6 +406,11 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             $dispersionStateRepository->method('get')->willReturnCallback(
                 fn (int $storeViewId, string $category) => new DispersionState($storeViewId, $category, null, null, 0)
             );
+        }
+
+        if ($dispersionEvaluator === null) {
+            $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
+            $dispersionEvaluator->method('estimatedDetectionLatencyHours')->willReturn(null);
         }
 
         if ($integrationHealthStateRepository === null) {
@@ -405,6 +462,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             $eventCounterRepository,
             $healthStateRepository,
             $dispersionStateRepository,
+            $dispersionEvaluator,
             $integrationHealthStateRepository,
             $integrationHealthConfigRepository,
             new LiveStoreViewResolver($storeManager),
