@@ -32,7 +32,7 @@ use Watchtower\Connector\Model\Seasonal\RetailCalendar;
 class DispersionEvaluator
 {
     /** Bumped whenever baseline logic or thresholds change, distinct from CronHealth\Evaluator's own version. */
-    public const RULESET_VERSION = '1.3.0';
+    public const RULESET_VERSION = '1.4.0';
 
     /**
      * Default rolling baseline window for Check A. Public because
@@ -99,6 +99,26 @@ class DispersionEvaluator
 
     /** Gap percentile at or above MIN_VIABLE_DAILY_VOLUME; chosen, not measured. */
     private const LOW_VOLUME_PERCENTILE_DEFAULT = 0.95;
+
+    /**
+     * Below this estimated daily volume, interArrivalRawStatus() reports
+     * INSUFFICIENT_DATA for its silence check instead of a percentile
+     * verdict. docs/connector-baseline-seasonality.md §2.1's simulation
+     * only validated the inter-arrival approach down to 5 orders/day --
+     * "nobody had actually modeled whether the inter-arrival approach holds
+     * up" below it, and it doesn't: with only a handful of historical
+     * events total, the gap distribution's own maximum (a store that saw
+     * gaps of a few days at most) sits far below a genuine multi-week
+     * silence, so ANY percentile computed from it fires SEVERE_DROP on a
+     * store that simply never had meaningful volume to begin with -- not a
+     * real drop from a real baseline. Confirmed against a real install: a
+     * secondary store view with 4 total historical quotes reported
+     * SEVERE_DROP off a 3-sample gap distribution topping out at 63 hours,
+     * the moment its already-typical silence passed that ceiling. Distinct
+     * from MIN_HISTORICAL_SAMPLES (a sample-count floor); this is a
+     * volume-rate floor grounded in the spec's own simulated evidence.
+     */
+    private const MIN_VALIDATED_DAILY_VOLUME = 5;
 
     /**
      * An hour with any events at all used to classify as trivially Normal in
@@ -399,6 +419,10 @@ class DispersionEvaluator
             return $this->lowVolumeSpikeStatus($series, $evaluatedHour, $observedCount);
         }
 
+        if ($this->estimatedDailyVolume($series, $evaluatedHour) < self::MIN_VALIDATED_DAILY_VOLUME) {
+            return SignalStatus::InsufficientData;
+        }
+
         $threshold = $this->percentile($distribution, $this->lowVolumeThresholdPercentile($series, $evaluatedHour));
 
         return $gaps->currentGapHours > $threshold ? SignalStatus::SevereDrop : SignalStatus::Normal;
@@ -486,17 +510,32 @@ class DispersionEvaluator
      */
     private function lowVolumeThresholdPercentile(array $series, \DateTimeImmutable $evaluatedHour): float
     {
+        return $this->estimatedDailyVolume($series, $evaluatedHour) < self::MIN_VIABLE_DAILY_VOLUME
+            ? self::LOW_VOLUME_PERCENTILE_QUIET
+            : self::LOW_VOLUME_PERCENTILE_DEFAULT;
+    }
+
+    /**
+     * Shared by lowVolumeThresholdPercentile() (which percentile to trust)
+     * and interArrivalRawStatus()'s MIN_VALIDATED_DAILY_VOLUME gate (whether
+     * to trust any percentile at all). Estimated daily volume uses the
+     * window's actual elapsed span, not the nominal LOW_VOLUME_LOOKBACK_WEEKS,
+     * so a brand-new install isn't understated.
+     *
+     * @param HourlyCountSample[] $series the same window fetched for the gap calculation
+     * @param \DateTimeImmutable $evaluatedHour top-of-hour instant of the completed hour being evaluated
+     * @return float
+     */
+    private function estimatedDailyVolume(array $series, \DateTimeImmutable $evaluatedHour): float
+    {
         if (empty($series)) {
-            return self::LOW_VOLUME_PERCENTILE_QUIET;
+            return 0.0;
         }
 
         $totalCount = array_sum(array_map(static fn (HourlyCountSample $sample): int => $sample->count, $series));
         $elapsedHours = max(1, $this->gapCalculator->hoursBetween($series[0]->bucket, $evaluatedHour));
-        $estimatedDailyVolume = $totalCount / ($elapsedHours / 24);
 
-        return $estimatedDailyVolume < self::MIN_VIABLE_DAILY_VOLUME
-            ? self::LOW_VOLUME_PERCENTILE_QUIET
-            : self::LOW_VOLUME_PERCENTILE_DEFAULT;
+        return $totalCount / ($elapsedHours / 24);
     }
 
     /**

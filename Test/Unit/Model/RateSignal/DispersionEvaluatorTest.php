@@ -799,23 +799,46 @@ class DispersionEvaluatorTest extends TestCase
 
     /**
      * Same gap and same historical distribution as the SevereDrop test
-     * above, but a low estimated daily volume (anchorCount=1, total 5
-     * events over the 28-day window is well under
-     * MIN_VIABLE_DAILY_VOLUME) -- proving the threshold VALUE itself
-     * changed, not just coincidentally landing on the same classification.
+     * above, but a low estimated daily volume (anchorCount=40, ~7.1
+     * orders/day: below MIN_VIABLE_DAILY_VOLUME but at/above
+     * MIN_VALIDATED_DAILY_VOLUME, so the percentile check still runs) --
+     * proving the threshold VALUE itself changed, not just coincidentally
+     * landing on the same classification.
      */
     public function testBelowMinimumViableDailyVolumeUsesTheQuieter99thPercentileNotThe95th(): void
     {
         $report = $this->evaluateLowVolumeWithConfirmedStatus(
             currentGapHours: 9,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
-            anchorCount: 1, // low volume: < MIN_VIABLE_DAILY_VOLUME, so the quieter 0.99 percentile applies.
+            anchorCount: 40, // ~7.1/day: < MIN_VIABLE_DAILY_VOLUME (10) but >= MIN_VALIDATED_DAILY_VOLUME (5).
             confirmed: SignalStatus::Normal
         );
 
         // distribution [1,1,1,10], 0.99 percentile = 9.73; gap 9 <= 9.73 --
         // the same gap that reported SevereDrop under the 0.95 threshold.
         self::assertSame(SignalStatus::Normal, $report->status);
+    }
+
+    /**
+     * Confirmed against a real install: a secondary store view with only 4
+     * total historical quotes (~0.18 estimated orders/day, far below both
+     * MIN_VALIDATED_DAILY_VOLUME and the volume band
+     * docs/connector-baseline-seasonality.md §2.1 actually simulated)
+     * reported SevereDrop the moment its already-typical silence passed the
+     * 3-sample gap distribution's own maximum. This is not a real drop from
+     * a real baseline -- the store never had enough volume to establish
+     * one -- so it must report INSUFFICIENT_DATA instead.
+     */
+    public function testEstimatedDailyVolumeBelowTheValidatedFloorReportsInsufficientDataNotSevereDrop(): void
+    {
+        $report = $this->evaluateLowVolumeWithConfirmedStatus(
+            currentGapHours: 9,
+            bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
+            anchorCount: 1, // ~0.18/day: below MIN_VALIDATED_DAILY_VOLUME (5).
+            confirmed: SignalStatus::InsufficientData
+        );
+
+        self::assertSame(SignalStatus::InsufficientData, $report->status);
     }
 
     public function testInsufficientBucketSamplesWidensToTheStoreWideDistributionRatherThanUsingATooSmallSample(): void
