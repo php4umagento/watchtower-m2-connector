@@ -979,6 +979,99 @@ class ReportingServiceTest extends TestCase
     }
 
     /**
+     * Regression coverage for the false-anomaly bug this closes: a store
+     * view with no local rollup history yet (a fresh Watchtower activation,
+     * or a newly-added store view) must be seeded automatically, not only
+     * via the manual `watchtower:coverage` command -- an install that never
+     * had it run by hand previously cold-started DispersionEvaluator on a
+     * near-empty baseline and could confirm a false SEVERE_DROP off noise.
+     */
+    public function testSeedsHistoricalBaselineForAStoreViewWithNoExistingRollupData(): void
+    {
+        $config = $this->configuredAndEnabled();
+
+        $evaluator = $this->createStub(Evaluator::class);
+        $evaluator->method('evaluate')->willReturn($this->report(sequenceNumber: 1));
+
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $rollupRepository = $this->createMock(RollupRepository::class);
+        $rollupRepository->expects(self::once())
+            ->method('hasAnyHourlyDataForCategories')
+            ->with(1, [
+                HistorySeeder::CATEGORY_BASKET_QUOTE,
+                HistorySeeder::CATEGORY_CHECKOUT,
+                HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT,
+            ])
+            ->willReturn(false);
+
+        $historySeeder = $this->createMock(HistorySeeder::class);
+        // Production code computes seed()'s 3rd argument by calling
+        // defaultBaselineWindowDays() on this same mock -- an unconfigured
+        // mocked method defaults to 0, not the real formula's 84, so this
+        // must be stubbed for the ->with() assertion below to reflect what
+        // ReportingService actually passes.
+        $historySeeder->method('defaultBaselineWindowDays')->willReturn(84);
+        $historySeeder->expects(self::once())
+            ->method('seed')
+            ->with(1, self::isInstanceOf(\DateTimeImmutable::class), 84)
+            ->willReturn([]);
+
+        $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
+        $dispersionEvaluator->method('evaluate')->willReturn(
+            $this->storeViewReport(HistorySeeder::CATEGORY_BASKET_QUOTE, 'default')
+        );
+
+        $this->service(
+            config: $config,
+            evaluator: $evaluator,
+            storeManager: $storeManager,
+            rollupRepository: $rollupRepository,
+            dispersionEvaluator: $dispersionEvaluator,
+            historySeeder: $historySeeder,
+        )->run();
+    }
+
+    /**
+     * The common-case counterpart: a store view that already has rollup
+     * data (from a previous cycle, or a prior manual coverage run) must
+     * never be re-seeded on every hourly tick -- HistorySeeder::seed() is
+     * idempotent but not free, and re-running it every cycle would waste a
+     * full historical walk for no benefit.
+     */
+    public function testDoesNotReSeedAStoreViewThatAlreadyHasRollupData(): void
+    {
+        $config = $this->configuredAndEnabled();
+
+        $evaluator = $this->createStub(Evaluator::class);
+        $evaluator->method('evaluate')->willReturn($this->report(sequenceNumber: 1));
+
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $rollupRepository = $this->createStub(RollupRepository::class);
+        $rollupRepository->method('hasAnyHourlyDataForCategories')->willReturn(true);
+
+        $historySeeder = $this->createMock(HistorySeeder::class);
+        $historySeeder->expects(self::never())->method('seed');
+
+        $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
+        $dispersionEvaluator->method('evaluate')->willReturn(
+            $this->storeViewReport(HistorySeeder::CATEGORY_BASKET_QUOTE, 'default')
+        );
+
+        $this->service(
+            config: $config,
+            evaluator: $evaluator,
+            storeManager: $storeManager,
+            rollupRepository: $rollupRepository,
+            dispersionEvaluator: $dispersionEvaluator,
+            historySeeder: $historySeeder,
+        )->run();
+    }
+
+    /**
      * A submission failure must buffer this ENTIRE cycle's reports
      * together (cron_health plus every store-view/category report),
      * not just cron_health alone. Nothing distinguishes "this cycle's
@@ -1485,6 +1578,7 @@ class ReportingServiceTest extends TestCase
      * @param CustomerAccountRegistrationReader|null $customerAccountReader
      * @param RollupRepository|null $rollupRepository
      * @param DispersionEvaluator|null $dispersionEvaluator
+     * @param HistorySeeder|null $historySeeder
      * @param IntegrationHealthConfigRepository|null $integrationHealthConfigRepository
      * @param IntegrationHealthEvaluator|null $integrationHealthEvaluator
      * @param CronJobObserver|null $cronJobObserver
@@ -1507,6 +1601,7 @@ class ReportingServiceTest extends TestCase
         ?CustomerAccountRegistrationReader $customerAccountReader = null,
         ?RollupRepository $rollupRepository = null,
         ?DispersionEvaluator $dispersionEvaluator = null,
+        ?HistorySeeder $historySeeder = null,
         ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
         ?IntegrationHealthEvaluator $integrationHealthEvaluator = null,
         ?CronJobObserver $cronJobObserver = null,
@@ -1521,6 +1616,18 @@ class ReportingServiceTest extends TestCase
         if ($storeManager === null) {
             $storeManager = $this->createStub(StoreManagerInterface::class);
             $storeManager->method('getStores')->willReturn([]);
+        }
+
+        if ($rollupRepository === null) {
+            $rollupRepository = $this->createStub(RollupRepository::class);
+            // Already-seeded by default, so seedIfNeverSeeded() is a no-op for
+            // every test that isn't specifically exercising the seeding path --
+            // matching this suite's behavior before that path existed.
+            $rollupRepository->method('hasAnyHourlyDataForCategories')->willReturn(true);
+        }
+
+        if ($historySeeder === null) {
+            $historySeeder = $this->createStub(HistorySeeder::class);
         }
 
         if ($integrationHealthConfigRepository === null) {
@@ -1551,8 +1658,9 @@ class ReportingServiceTest extends TestCase
             $basketQuoteReader ?? $this->createStub(BasketQuoteReader::class),
             $checkoutReader ?? $this->createStub(CheckoutReader::class),
             $customerAccountReader ?? $this->createStub(CustomerAccountRegistrationReader::class),
-            $rollupRepository ?? $this->createStub(RollupRepository::class),
+            $rollupRepository,
             $dispersionEvaluator ?? $this->createStub(DispersionEvaluator::class),
+            $historySeeder,
             $integrationHealthConfigRepository,
             $integrationHealthEvaluator ?? $this->createStub(IntegrationHealthEvaluator::class),
             $cronJobObserver ?? $this->createStub(CronJobObserver::class),

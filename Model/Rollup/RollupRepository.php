@@ -122,6 +122,34 @@ class RollupRepository
     }
 
     /**
+     * Whether any hourly rollup row already exists for this store view across
+     * the given categories -- used to gate the one-time historical seed
+     * (Model\Seed\HistorySeeder) so it fires exactly once per store view,
+     * without a separate persisted flag: this reads the same table the seed
+     * itself writes to, rather than inventing new state that could drift
+     * out of sync with it.
+     *
+     * @param int $storeViewId
+     * @param string[] $categories
+     * @return bool
+     */
+    public function hasAnyHourlyDataForCategories(int $storeViewId, array $categories): bool
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $table = $this->resourceConnection->getTableName(self::HOURLY_TABLE);
+
+        $row = $connection->fetchOne(
+            $connection->select()
+                ->from($table, [new \Zend_Db_Expr('1')])
+                ->where('store_view_id = ?', $storeViewId)
+                ->where('category IN (?)', $categories)
+                ->limit(1)
+        );
+
+        return $row !== false;
+    }
+
+    /**
      * Fetches historical hourly counts for one bucket over the last N weeks.
      *
      * Bucket = (store view, category, hour-of-day, day-of-week).

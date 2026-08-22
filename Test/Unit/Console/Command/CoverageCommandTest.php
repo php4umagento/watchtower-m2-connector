@@ -34,6 +34,12 @@ class CoverageCommandTest extends TestCase
         $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
 
         $historySeeder = $this->createMock(HistorySeeder::class);
+        // Production code computes seed()'s 3rd argument by calling
+        // defaultBaselineWindowDays() on this same mock -- an unconfigured
+        // mocked method defaults to 0, not the real formula's 84, so this
+        // must be stubbed for the ->with() assertion below to reflect what
+        // CoverageCommand actually passes.
+        $historySeeder->method('defaultBaselineWindowDays')->willReturn(84);
         $historySeeder->expects($this->once())
             ->method('seed')
             ->with(1, $this->isInstanceOf(\DateTimeImmutable::class), 84)

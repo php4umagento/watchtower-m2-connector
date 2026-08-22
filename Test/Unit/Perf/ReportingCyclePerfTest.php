@@ -36,6 +36,7 @@ use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\ReportingService;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
+use Watchtower\Connector\Model\Seed\HistorySeeder;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
 use Watchtower\Connector\Model\Signal\CustomerAccountRegistrationReader;
@@ -219,6 +220,7 @@ class ReportingCyclePerfTest extends TestCase
         ?RollupRepository $rollupRepository = null,
         ?DispersionEvaluator $dispersionEvaluator = null,
         ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
+        ?HistorySeeder $historySeeder = null,
     ): ReportingService {
         $config = $this->createStub(Config::class);
         $config->method('isConfigured')->willReturn(true);
@@ -250,6 +252,14 @@ class ReportingCyclePerfTest extends TestCase
         $integrationHealthEvaluator = $this->createStub(IntegrationHealthEvaluator::class);
         $integrationHealthEvaluator->method('heartbeatRetiredIfPreviouslyReported')->willReturn(null);
 
+        if ($rollupRepository === null) {
+            $rollupRepository = $this->createStub(RollupRepository::class);
+            // Already-seeded by default, so seedIfNeverSeeded() is a no-op --
+            // this suite measures the ordinary evaluation loop's call volume,
+            // not the one-time seed path.
+            $rollupRepository->method('hasAnyHourlyDataForCategories')->willReturn(true);
+        }
+
         return new ReportingService(
             $config,
             $cronHealthEvaluator,
@@ -259,8 +269,9 @@ class ReportingCyclePerfTest extends TestCase
             $basketQuoteReader ?? $this->stubBasketQuoteReader(),
             $checkoutReader ?? $this->stubCheckoutReader(),
             $customerAccountReader ?? $this->stubCustomerAccountReader(),
-            $rollupRepository ?? $this->createStub(RollupRepository::class),
+            $rollupRepository,
             $dispersionEvaluator ?? $this->stubDispersionEvaluator(),
+            $historySeeder ?? $this->createStub(HistorySeeder::class),
             $integrationHealthConfigRepository ?? $this->stubIntegrationHealthConfigRepository(),
             $integrationHealthEvaluator,
             $this->createStub(CronJobObserver::class),
