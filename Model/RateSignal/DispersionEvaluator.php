@@ -214,13 +214,26 @@ class DispersionEvaluator
             // Second consecutive differing tick: confirm using the current raw status.
             $this->save($storeViewId, $category, null, $rawStatus, $state->sequenceNumber + 1);
 
+            // Same "warm-up finishing is not a recovery" reasoning as
+            // CronHealth\Evaluator and IntegrationHealth\Evaluator --
+            // confirming NORMAL straight out of the INSUFFICIENT_DATA seed
+            // (a fresh install's baseline just finished building, see
+            // BASELINE_WEEKS/LOW_VOLUME_LOOKBACK_WEEKS above) must not report
+            // as a transition, or the platform sends a "back to normal" email
+            // for a store view that was never actually down. An anomalous
+            // status confirmed out of the seed is still a genuine
+            // first-detected problem and keeps alerting.
+            $reason = $state->confirmedStatus === SignalStatus::InsufficientData && $rawStatus === SignalStatus::Normal
+                ? ReportReason::Heartbeat
+                : ReportReason::Transition;
+
             return $this->report(
                 $storeViewCode,
                 $category,
                 $rawStatus,
                 $state->sequenceNumber,
                 $evaluatedAt,
-                ReportReason::Transition
+                $reason
             );
         }
 

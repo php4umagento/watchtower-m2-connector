@@ -131,6 +131,69 @@ class EvaluatorTest extends TestCase
     }
 
     /**
+     * Regression test for a real bug: a fresh install's cron_health warms up
+     * through INSUFFICIENT_DATA (the isFirstEvaluation() seed) before its
+     * first real confirmed status. Confirming NORMAL straight out of that
+     * seed must NOT report as a transition -- cron was never actually down,
+     * so this is warm-up finishing, not a recovery. Reporting it as a
+     * transition makes the platform send an unconditional "back to normal"
+     * email (App\Notifications\InstallAlertNotification, watchtower-saas)
+     * for an account that never had a problem.
+     */
+    public function testConfirmingNormalStraightOutOfTheInsufficientDataSeedIsAHeartbeatNotAResolvedTransition(): void
+    {
+        $state = $this->stateWith(
+            confirmed: SignalStatus::InsufficientData,
+            pending: SignalStatus::Normal,
+            sequence: 3
+        );
+
+        $savedState = null;
+        $repository = $this->createMock(HealthStateRepository::class);
+        $repository->method('get')->willReturn($state);
+        $repository->expects(self::once())->method('save')->with(self::captureInto($savedState));
+
+        $observer = $this->createStub(CronScheduleObserver::class);
+        $observer->method('observe')->willReturn(new Observation($this->now(), null));
+
+        $report = (new Evaluator($observer, $repository))->evaluate($this->now());
+
+        self::assertSame(SignalStatus::Normal, $report->status);
+        self::assertSame(ReportReason::Heartbeat, $report->reason);
+        self::assertSame(SignalStatus::Normal, $savedState->confirmedStatus);
+        self::assertNull($savedState->pendingStatus);
+    }
+
+    /**
+     * The counterpart to the above: confirming an ANOMALOUS status straight
+     * out of the INSUFFICIENT_DATA seed is still a genuine first-detected
+     * problem (a fresh install whose cron never worked at all), not a false
+     * recovery -- this must stay a transition so it still alerts.
+     */
+    public function testConfirmingAnAnomalousStatusStraightOutOfTheInsufficientDataSeedIsStillATransition(): void
+    {
+        $state = $this->stateWith(
+            confirmed: SignalStatus::InsufficientData,
+            pending: SignalStatus::SevereDrop,
+            sequence: 3
+        );
+
+        $savedState = null;
+        $repository = $this->createMock(HealthStateRepository::class);
+        $repository->method('get')->willReturn($state);
+        $repository->expects(self::once())->method('save')->with(self::captureInto($savedState));
+
+        $observer = $this->createStub(CronScheduleObserver::class);
+        $observer->method('observe')->willReturn(new Observation(null, null));
+
+        $report = (new Evaluator($observer, $repository))->evaluate($this->now());
+
+        self::assertSame(SignalStatus::SevereDrop, $report->status);
+        self::assertSame(ReportReason::Transition, $report->reason);
+        self::assertSame(SignalStatus::SevereDrop, $savedState->confirmedStatus);
+    }
+
+    /**
      * The recovery direction, not just the down direction; the spec's own
      * debounce worked example walks both, and this was previously verified
      * only by hand against the live platform, not by a regression test.

@@ -95,7 +95,20 @@ class Evaluator
         if ($state->pendingStatus !== null) {
             $this->save($lastSuccessAt, $lastFailureAt, null, $rawStatus, $state->sequenceNumber + 1);
 
-            return $this->report($rawStatus, $state->sequenceNumber, $now, ReportReason::Transition);
+            // Confirming NORMAL straight out of the INSUFFICIENT_DATA seed (see
+            // isFirstEvaluation() above) is warm-up finishing on a fresh install,
+            // not a recovery -- cron was never actually down. Reporting it as a
+            // transition makes the platform send an unconditional "back to
+            // normal" email (App\Notifications\InstallAlertNotification in
+            // watchtower-saas) for an account that never had a problem.
+            // Confirming an anomalous status out of the seed is still a genuine
+            // first-detected outage, so that case stays a transition and still
+            // alerts.
+            $reason = $state->confirmedStatus === SignalStatus::InsufficientData && $rawStatus === SignalStatus::Normal
+                ? ReportReason::Heartbeat
+                : ReportReason::Transition;
+
+            return $this->report($rawStatus, $state->sequenceNumber, $now, $reason);
         }
 
         // First differing tick: start the confirmation counter; still report the old confirmed value.
