@@ -109,6 +109,40 @@ class StatusCommandTest extends TestCase
         self::assertStringContainsString('customer_account: INSUFFICIENT_DATA (sequence 1)', $display);
     }
 
+    public function testPrintsEstimatedDetectionLatencyOnlyForALowVolumeSignal(): void
+    {
+        $snapshot = new DiagnosticsSnapshot(
+            reachable: true,
+            unreachableError: null,
+            keyValid: true,
+            organizationPaused: false,
+            lastSuccessfulSubmissionAt: new \DateTimeImmutable('2026-08-14T10:00:00+00:00'),
+            bufferedReportCount: 0,
+            droppedEventCountLast24Hours: 0,
+            cronHealth: new SignalSnapshot('cron_health', SignalStatus::Normal, 12),
+            storeViews: [
+                new StoreViewSnapshot(1, 'default', [
+                    new SignalSnapshot('basket_quote', SignalStatus::Normal, 5, 18.73),
+                    new SignalSnapshot('checkout', SignalStatus::InsufficientData, 1),
+                ]),
+            ],
+            recentSubmissionOutcomes: [],
+            environment: $this->emptyEnvironmentState(),
+            connectorVersion: $this->uncheckedConnectorVersionState(),
+        );
+
+        $tester = new CommandTester($this->command(snapshot: $snapshot));
+        $tester->execute([]);
+
+        $display = $tester->getDisplay();
+        self::assertStringContainsString(
+            'basket_quote: NORMAL (sequence 5), ~19h to detect a full outage (low-volume mode)',
+            $display
+        );
+        self::assertStringContainsString('checkout: INSUFFICIENT_DATA (sequence 1)', $display);
+        self::assertStringNotContainsString('checkout: INSUFFICIENT_DATA (sequence 1), ~', $display);
+    }
+
     public function testPrintsNoOutcomesRecordedYetWhenNoneExist(): void
     {
         $tester = new CommandTester($this->command());

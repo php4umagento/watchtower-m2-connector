@@ -5,6 +5,13 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.14.0] - 2026-08-22
+
+The admin diagnostics page and `watchtower:status` now show a store's
+estimated detection latency for a full outage on any signal currently in
+Low-Volume Signal Mode, so a low-volume merchant sees an honest confidence
+number instead of a silent status toggle.
+
 ## [1.13.0] - 2026-08-22
 
 Low-Volume Signal Mode now reports `INSUFFICIENT_DATA` instead of a

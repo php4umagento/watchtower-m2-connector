@@ -86,6 +86,23 @@ class Overview extends Template
     }
 
     /**
+     * A signal's estimated detection latency for a full outage, rendered as
+     * e.g. "~19h (low-volume mode)", or an empty string when the signal
+     * isn't in Low-Volume Signal Mode -- most signals never show this.
+     *
+     * @param SignalSnapshot $signal
+     * @return string
+     */
+    public function detectionLatencyLabel(SignalSnapshot $signal): string
+    {
+        if ($signal->estimatedDetectionLatencyHours === null) {
+            return '';
+        }
+
+        return sprintf('~%dh (low-volume mode)', (int) ceil($signal->estimatedDetectionLatencyHours));
+    }
+
+    /**
      * Whether a store view has any signal in a non-NORMAL state, so its
      * collapsible block can default to expanded -- a store view with a real
      * problem should never be hidden behind an extra click.

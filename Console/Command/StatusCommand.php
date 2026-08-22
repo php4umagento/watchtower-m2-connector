@@ -140,11 +140,19 @@ class StatusCommand extends Command
             $output->writeln(sprintf('Store view "%s" (id=%d):', $storeView->storeViewCode, $storeView->storeViewId));
 
             foreach ($storeView->signals as $signal) {
+                $latency = $signal->estimatedDetectionLatencyHours !== null
+                    ? sprintf(
+                        ', ~%dh to detect a full outage (low-volume mode)',
+                        (int) ceil($signal->estimatedDetectionLatencyHours)
+                    )
+                    : '';
+
                 $output->writeln(sprintf(
-                    '  %s: %s (sequence %d)',
+                    '  %s: %s (sequence %d)%s',
                     $signal->category,
                     $signal->status?->value ?? 'no data yet',
-                    $signal->sequenceNumber
+                    $signal->sequenceNumber,
+                    $latency
                 ));
             }
         }

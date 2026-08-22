@@ -841,6 +841,83 @@ class DispersionEvaluatorTest extends TestCase
         self::assertSame(SignalStatus::InsufficientData, $report->status);
     }
 
+    /**
+     * estimatedDetectionLatencyHours() is a read-only diagnostic query, not
+     * part of evaluate()'s debounce state machine -- these tests construct
+     * DispersionEvaluator directly rather than going through
+     * evaluateLowVolumeWithConfirmedStatus(), which only isolates
+     * evaluate()'s "no change" branch.
+     */
+    public function testEstimatedDetectionLatencyIsNullWhenTheSignalIsNotInLowVolumeMode(): void
+    {
+        $stateRepository = $this->createStub(DispersionStateRepository::class);
+
+        $rollupRepository = $this->createMock(RollupRepository::class);
+        $rollupRepository->expects(self::once())->method('hourlyCountsForBucket')->willReturn([
+            $this->sample(weeksAgo: 4, count: 100),
+            $this->sample(weeksAgo: 3, count: 102),
+            $this->sample(weeksAgo: 2, count: 98),
+            $this->sample(weeksAgo: 1, count: 101),
+        ]);
+        // A signal whose own median clears VOLUME_FLOOR never needs the
+        // inter-arrival window at all.
+        $rollupRepository->expects(self::never())->method('allHourlyCountsInWindow');
+
+        $latency = (new DispersionEvaluator($rollupRepository, $stateRepository))
+            ->estimatedDetectionLatencyHours(self::STORE_VIEW_ID, self::CATEGORY, $this->now());
+
+        self::assertNull($latency);
+    }
+
+    public function testEstimatedDetectionLatencyMatchesTheThresholdThatWouldTriggerSevereDrop(): void
+    {
+        $stateRepository = $this->createStub(DispersionStateRepository::class);
+
+        $rollupRepository = $this->createStub(RollupRepository::class);
+        $rollupRepository->method('hourlyCountsForBucket')->willReturn([
+            $this->sample(weeksAgo: 4, count: 2),
+            $this->sample(weeksAgo: 3, count: 2),
+            $this->sample(weeksAgo: 2, count: 3),
+            $this->sample(weeksAgo: 1, count: 3),
+        ]);
+        $rollupRepository->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
+            currentGapHours: 9,
+            bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
+            anchorCount: 100, // high volume: >= MIN_VIABLE_DAILY_VOLUME, so the 0.95 default percentile applies.
+        ));
+
+        $latency = (new DispersionEvaluator($rollupRepository, $stateRepository))
+            ->estimatedDetectionLatencyHours(self::STORE_VIEW_ID, self::CATEGORY, $this->now());
+
+        // Same distribution/percentile arithmetic as
+        // testAZeroCountWithAGapExceedingTheThresholdReportsSevereDrop:
+        // [1,1,1,10] at the 0.95 percentile = 8.65.
+        self::assertEqualsWithDelta(8.65, $latency, 0.001);
+    }
+
+    public function testEstimatedDetectionLatencyIsNullBelowTheValidatedVolumeFloor(): void
+    {
+        $stateRepository = $this->createStub(DispersionStateRepository::class);
+
+        $rollupRepository = $this->createStub(RollupRepository::class);
+        $rollupRepository->method('hourlyCountsForBucket')->willReturn([
+            $this->sample(weeksAgo: 4, count: 2),
+            $this->sample(weeksAgo: 3, count: 2),
+            $this->sample(weeksAgo: 2, count: 3),
+            $this->sample(weeksAgo: 1, count: 3),
+        ]);
+        $rollupRepository->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
+            currentGapHours: 9,
+            bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
+            anchorCount: 1, // ~0.18/day: below MIN_VALIDATED_DAILY_VOLUME (5).
+        ));
+
+        $latency = (new DispersionEvaluator($rollupRepository, $stateRepository))
+            ->estimatedDetectionLatencyHours(self::STORE_VIEW_ID, self::CATEGORY, $this->now());
+
+        self::assertNull($latency);
+    }
+
     public function testInsufficientBucketSamplesWidensToTheStoreWideDistributionRatherThanUsingATooSmallSample(): void
     {
         // Only 2 weeks of same-bucket history (bucketGapDistribution has 2
