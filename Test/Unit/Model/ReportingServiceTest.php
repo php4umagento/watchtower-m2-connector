@@ -37,6 +37,9 @@ use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\ReportingService;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
+use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
+use Watchtower\Connector\Model\Seed\SeedCoverageResult;
+use Watchtower\Connector\Model\Seed\SeedCoverageStatus;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
 use Watchtower\Connector\Model\Signal\CustomerAccountRegistrationReader;
@@ -1013,10 +1016,19 @@ class ReportingServiceTest extends TestCase
         // must be stubbed for the ->with() assertion below to reflect what
         // ReportingService actually passes.
         $historySeeder->method('defaultBaselineWindowDays')->willReturn(84);
+        $seedResult = new SeedCoverageResult(
+            category: HistorySeeder::CATEGORY_BASKET_QUOTE,
+            requestedDays: 84,
+            daysSeeded: 26,
+            status: SeedCoverageStatus::Seeded,
+        );
         $historySeeder->expects(self::once())
             ->method('seed')
             ->with(1, self::isInstanceOf(\DateTimeImmutable::class), 84)
-            ->willReturn([]);
+            ->willReturn([HistorySeeder::CATEGORY_BASKET_QUOTE => $seedResult]);
+
+        $seedCoverageRepository = $this->createMock(SeedCoverageRepository::class);
+        $seedCoverageRepository->expects(self::once())->method('save')->with(1, $seedResult);
 
         $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
         $dispersionEvaluator->method('evaluate')->willReturn(
@@ -1030,6 +1042,7 @@ class ReportingServiceTest extends TestCase
             rollupRepository: $rollupRepository,
             dispersionEvaluator: $dispersionEvaluator,
             historySeeder: $historySeeder,
+            seedCoverageRepository: $seedCoverageRepository,
         )->run();
     }
 
@@ -1056,6 +1069,9 @@ class ReportingServiceTest extends TestCase
         $historySeeder = $this->createMock(HistorySeeder::class);
         $historySeeder->expects(self::never())->method('seed');
 
+        $seedCoverageRepository = $this->createMock(SeedCoverageRepository::class);
+        $seedCoverageRepository->expects(self::never())->method('save');
+
         $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
         $dispersionEvaluator->method('evaluate')->willReturn(
             $this->storeViewReport(HistorySeeder::CATEGORY_BASKET_QUOTE, 'default')
@@ -1068,6 +1084,7 @@ class ReportingServiceTest extends TestCase
             rollupRepository: $rollupRepository,
             dispersionEvaluator: $dispersionEvaluator,
             historySeeder: $historySeeder,
+            seedCoverageRepository: $seedCoverageRepository,
         )->run();
     }
 
@@ -1579,6 +1596,7 @@ class ReportingServiceTest extends TestCase
      * @param RollupRepository|null $rollupRepository
      * @param DispersionEvaluator|null $dispersionEvaluator
      * @param HistorySeeder|null $historySeeder
+     * @param SeedCoverageRepository|null $seedCoverageRepository
      * @param IntegrationHealthConfigRepository|null $integrationHealthConfigRepository
      * @param IntegrationHealthEvaluator|null $integrationHealthEvaluator
      * @param CronJobObserver|null $cronJobObserver
@@ -1602,6 +1620,7 @@ class ReportingServiceTest extends TestCase
         ?RollupRepository $rollupRepository = null,
         ?DispersionEvaluator $dispersionEvaluator = null,
         ?HistorySeeder $historySeeder = null,
+        ?SeedCoverageRepository $seedCoverageRepository = null,
         ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
         ?IntegrationHealthEvaluator $integrationHealthEvaluator = null,
         ?CronJobObserver $cronJobObserver = null,
@@ -1628,6 +1647,10 @@ class ReportingServiceTest extends TestCase
 
         if ($historySeeder === null) {
             $historySeeder = $this->createStub(HistorySeeder::class);
+        }
+
+        if ($seedCoverageRepository === null) {
+            $seedCoverageRepository = $this->createStub(SeedCoverageRepository::class);
         }
 
         if ($integrationHealthConfigRepository === null) {
@@ -1661,6 +1684,7 @@ class ReportingServiceTest extends TestCase
             $rollupRepository,
             $dispersionEvaluator ?? $this->createStub(DispersionEvaluator::class),
             $historySeeder,
+            $seedCoverageRepository,
             $integrationHealthConfigRepository,
             $integrationHealthEvaluator ?? $this->createStub(IntegrationHealthEvaluator::class),
             $cronJobObserver ?? $this->createStub(CronJobObserver::class),

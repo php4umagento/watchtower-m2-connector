@@ -14,29 +14,34 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
-use Watchtower\Connector\Model\Seed\SeedCoverageResult;
-use Watchtower\Connector\Model\Seed\SeedCoverageStatus;
-use Watchtower\Connector\Model\Seed\SeedLimitReason;
+use Watchtower\Connector\Model\Seed\SeedCoverageLabel;
+use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
 
 /**
- * Reports local historical baseline coverage for every live store view.
+ * Seeds and reports local historical baseline coverage for every live store view.
  *
- * This command's own execution IS the seeding trigger -- HistorySeeder has no
- * other caller and no crontab entry, so every invocation re-seeds rather than
- * only reading back already-seeded state. Re-seeding an already-seeded hour is
- * wasteful but never incorrect, since RollupRepository::recordHourlyCount() is
- * an idempotent upsert.
+ * This command's own execution IS one of the seeding triggers -- the other is
+ * ReportingService's own first-evaluation seed (see its seedIfNeverSeeded()) --
+ * so every invocation here re-seeds rather than only reading back already-seeded
+ * state. Re-seeding an already-seeded hour is wasteful but never incorrect,
+ * since RollupRepository::recordHourlyCount() is an idempotent upsert. Each
+ * result is also persisted via SeedCoverageRepository, so the diagnostics page
+ * and watchtower:status can read back the outcome without re-seeding.
  */
 class CoverageCommand extends Command
 {
     /**
      * @param HistorySeeder $historySeeder
      * @param StoreManagerInterface $storeManager
+     * @param SeedCoverageRepository $seedCoverageRepository
+     * @param SeedCoverageLabel $seedCoverageLabel
      * @param string|null $name
      */
     public function __construct(
         private readonly HistorySeeder $historySeeder,
         private readonly StoreManagerInterface $storeManager,
+        private readonly SeedCoverageRepository $seedCoverageRepository,
+        private readonly SeedCoverageLabel $seedCoverageLabel,
         ?string $name = null
     ) {
         parent::__construct($name);
@@ -81,72 +86,20 @@ class CoverageCommand extends Command
         foreach ($liveStores as $store) {
             $output->writeln(sprintf('<info>%s (%s):</info>', $store->getName(), $store->getCode()));
 
+            $storeViewId = (int) $store->getId();
             $results = $this->historySeeder->seed(
-                (int) $store->getId(),
+                $storeViewId,
                 $now,
                 $this->historySeeder->defaultBaselineWindowDays()
             );
 
             foreach ($results as $result) {
-                $output->writeln('  '.$this->describe($result));
+                $this->seedCoverageRepository->save($storeViewId, $result);
+                $output->writeln('  '.$this->seedCoverageLabel->describe($result));
             }
         }
 
         return Command::SUCCESS;
-    }
-
-    /**
-     * Renders one category's coverage result in merchant-facing wording.
-     *
-     * @param SeedCoverageResult $result
-     * @return string
-     */
-    private function describe(SeedCoverageResult $result): string
-    {
-        $label = $this->categoryLabel($result->category);
-
-        if ($result->status === SeedCoverageStatus::Seeded) {
-            return sprintf('%s history seeded: %d days', $label, $result->daysSeeded);
-        }
-
-        return match ($result->limitReason) {
-            SeedLimitReason::RetentionCliff => sprintf(
-                '%s history unavailable (quote lifetime is %d days); warming up',
-                $label,
-                $result->sourceRetentionDays ?? 0
-            ),
-            SeedLimitReason::RowCountCeiling => sprintf(
-                '%s history seeded: %d of %d days (stopped early -- this store has a very large amount of history)',
-                $label,
-                $result->daysSeeded,
-                $result->requestedDays
-            ),
-            SeedLimitReason::InsufficientHistory => sprintf(
-                '%s history warming up: %d of %d days available so far',
-                $label,
-                $result->daysSeeded,
-                $result->requestedDays
-            ),
-            // HistorySeeder never returns Limited without a reason; this
-            // branch exists only so match() is exhaustive for phpstan.
-            null => sprintf('%s history limited: %d of %d days', $label, $result->daysSeeded, $result->requestedDays),
-        };
-    }
-
-    /**
-     * Plain merchant-readable label for a HistorySeeder::CATEGORY_* constant.
-     *
-     * @param string $category
-     * @return string
-     */
-    private function categoryLabel(string $category): string
-    {
-        return match ($category) {
-            HistorySeeder::CATEGORY_BASKET_QUOTE => 'cart',
-            HistorySeeder::CATEGORY_CHECKOUT => 'checkout',
-            HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT => 'customer account',
-            default => $category,
-        };
     }
 
     /**

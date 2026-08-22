@@ -5,6 +5,16 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.17.0] - 2026-08-22
+
+The admin diagnostics page and `watchtower:status` now show per-signal
+local baseline seed coverage (e.g. "cart history seeded: 26 days" or
+"cart history unavailable (quote lifetime is 7 days); warming up") --
+the answer to "why is this still warming up?", previously only visible
+in a log line or a manual `watchtower:coverage` run. Adds a
+`watchtower_seed_coverage` table, written by both `watchtower:coverage`
+and the automatic first-evaluation seed; run `setup:upgrade`.
+
 ## [1.16.0] - 2026-08-22
 
 The admin diagnostics page and `watchtower:status` now show which named

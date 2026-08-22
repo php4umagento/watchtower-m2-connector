@@ -22,6 +22,7 @@ use Watchtower\Connector\Model\Diagnostics\StoreViewSnapshot;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
 use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\EnvironmentState;
+use Watchtower\Connector\Model\Seed\SeedCoverageLabel;
 
 /**
  * Delegates all data assembly to DiagnosticsSnapshotProvider (shared with
@@ -398,6 +399,6 @@ class StatusCommandTest extends TestCase
         $provider = $this->createStub(DiagnosticsSnapshotProvider::class);
         $provider->method('snapshot')->willReturn($snapshot);
 
-        return new StatusCommand($config, $provider);
+        return new StatusCommand($config, $provider, new SeedCoverageLabel());
     }
 }

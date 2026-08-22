@@ -35,12 +35,15 @@ use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionState;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
+use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
+use Watchtower\Connector\Model\Seed\SeedCoverageResult;
+use Watchtower\Connector\Model\Seed\SeedCoverageStatus;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 use Watchtower\Connector\Test\Unit\StoreStubTrait;
 
 /**
  * Proves DiagnosticsSnapshotProvider assembles a full DiagnosticsSnapshot
- * from its 11 read-only sources -- this is the shared layer both
+ * from its 12 read-only sources -- this is the shared layer both
  * watchtower:status and the admin diagnostics page render, so its own
  * assembly logic is tested independently of either presentation.
  */
@@ -270,6 +273,61 @@ class DiagnosticsSnapshotProviderTest extends TestCase
     }
 
     /**
+     * seedCoverage is a read-only SeedCoverageRepository lookup, keyed the
+     * same way estimatedDetectionLatencyHours is (per store view/category) --
+     * proves it reaches the right SignalSnapshot and stays null for a
+     * category that was never seeded.
+     */
+    public function testSeedCoverageIsThreadedOntoTheMatchingSignalSnapshot(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $dispersionStateRepository = $this->createStub(DispersionStateRepository::class);
+        $dispersionStateRepository->method('get')->willReturnCallback(
+            fn (int $storeViewId, string $category) => new DispersionState(
+                storeViewId: $storeViewId,
+                category: $category,
+                pendingStatus: null,
+                confirmedStatus: SignalStatus::Normal,
+                sequenceNumber: 5,
+            )
+        );
+
+        $seedResult = new SeedCoverageResult(
+            category: HistorySeeder::CATEGORY_BASKET_QUOTE,
+            requestedDays: 84,
+            daysSeeded: 26,
+            status: SeedCoverageStatus::Seeded,
+        );
+        $seedCoverageRepository = $this->createStub(SeedCoverageRepository::class);
+        $seedCoverageRepository->method('get')->willReturnCallback(
+            fn (int $storeViewId, string $category) => $category === HistorySeeder::CATEGORY_BASKET_QUOTE
+                ? $seedResult
+                : null
+        );
+
+        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
+        $integrationHealthConfigRepository->method('get')->willReturn(null);
+
+        $snapshot = $this->provider(
+            storeManager: $storeManager,
+            dispersionStateRepository: $dispersionStateRepository,
+            seedCoverageRepository: $seedCoverageRepository,
+            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+        )->snapshot($this->now());
+
+        $byCategory = [];
+        foreach ($snapshot->storeViews[0]->signals as $signal) {
+            $byCategory[$signal->category] = $signal->seedCoverage;
+        }
+
+        self::assertSame($seedResult, $byCategory[HistorySeeder::CATEGORY_BASKET_QUOTE]);
+        self::assertNull($byCategory[HistorySeeder::CATEGORY_CHECKOUT]);
+        self::assertNull($byCategory[HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT]);
+    }
+
+    /**
      * A store view WITH a configured integration_health source gets a 4th
      * signal for it; one WITHOUT does not -- the config repository's
      * get() returning null is exactly the gate DiagnosticsSnapshotProvider
@@ -417,6 +475,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         ?HealthStateRepository $healthStateRepository = null,
         ?DispersionStateRepository $dispersionStateRepository = null,
         ?DispersionEvaluator $dispersionEvaluator = null,
+        ?SeedCoverageRepository $seedCoverageRepository = null,
         ?IntegrationHealthStateRepository $integrationHealthStateRepository = null,
         ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
         ?StoreManagerInterface $storeManager = null,
@@ -464,6 +523,11 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         if ($dispersionEvaluator === null) {
             $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
             $dispersionEvaluator->method('estimatedDetectionLatencyHours')->willReturn(null);
+        }
+
+        if ($seedCoverageRepository === null) {
+            $seedCoverageRepository = $this->createStub(SeedCoverageRepository::class);
+            $seedCoverageRepository->method('get')->willReturn(null);
         }
 
         if ($integrationHealthStateRepository === null) {
@@ -516,6 +580,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             $healthStateRepository,
             $dispersionStateRepository,
             $dispersionEvaluator,
+            $seedCoverageRepository,
             $integrationHealthStateRepository,
             $integrationHealthConfigRepository,
             new LiveStoreViewResolver($storeManager),

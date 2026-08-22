@@ -218,6 +218,7 @@ $versionState = $snapshot->connectorVersion;
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Sequence Number')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Outage Detection')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Driven By')) ?></th>
+                            <th class="data-grid-th"><?= $escaper->escapeHtml(__('Seed Coverage')) ?></th>
                         </tr>
                         </thead>
                         <tbody>
@@ -234,6 +235,9 @@ $versionState = $snapshot->connectorVersion;
                                 </td>
                                 <td class="data-grid-td">
                                     <?= $escaper->escapeHtml($block->ensembleAttributionLabel($signal)) ?>
+                                </td>
+                                <td class="data-grid-td">
+                                    <?= $escaper->escapeHtml($block->seedCoverageLabel($signal)) ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

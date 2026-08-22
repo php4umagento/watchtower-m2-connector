@@ -185,6 +185,29 @@
             <column name="category"/>
         </constraint>
     </table>
+    <table name="watchtower_seed_coverage" resource="default" engine="innodb"
+           comment="Last HistorySeeder outcome per store view and category, for diagnostics.">
+        <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
+                comment="Magento store view id"/>
+        <column xsi:type="varchar" name="category" nullable="false" length="64"
+                comment="Signal category, e.g. basket_quote, checkout, customer_account"/>
+        <column xsi:type="varchar" name="status" nullable="false" length="20"
+                comment="seeded or limited"/>
+        <column xsi:type="int" name="requested_days" unsigned="true" nullable="false"
+                comment="Baseline window days seeding was asked to cover"/>
+        <column xsi:type="int" name="days_seeded" unsigned="true" nullable="false"
+                comment="Days of history actually seeded"/>
+        <column xsi:type="varchar" name="limit_reason" nullable="true" length="32"
+                comment="Why status is limited, set only when it is"/>
+        <column xsi:type="int" name="source_retention_days" unsigned="true" nullable="true"
+                comment="Source table's own retention bound, when it limited seeding"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last seeded"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="store_view_id"/>
+            <column name="category"/>
+        </constraint>
+    </table>
     <table name="watchtower_event_drop_counter" resource="default" engine="innodb"
            comment="Local diagnostic count of events with no resolvable store, never transmitted.">
         <column xsi:type="varchar" name="event_name" nullable="false" length="32"
