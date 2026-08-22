@@ -17,6 +17,7 @@ use Watchtower\Connector\Model\Api\MetricsSubmissionService;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\Response;
 use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\Environment\ConnectorVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 
 /**
@@ -135,6 +136,7 @@ class WireContractConformanceTest extends TestCase
         $service = new MetricsSubmissionService(
             $client,
             $this->createStub(OrganizationStateRepository::class),
+            $this->createStub(ConnectorVersionReader::class),
             $this->createStub(LoggerInterface::class)
         );
         $service->submit('https://watchtower.test', 'a-key', [$report]);

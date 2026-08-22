@@ -16,6 +16,7 @@ use Watchtower\Connector\Model\Api\MetricsSubmissionService;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\Response;
 use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\Environment\ConnectorVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 
 /**
@@ -133,6 +134,7 @@ class MetricsSubmissionServiceTest extends TestCase
         $service = new MetricsSubmissionService(
             $client,
             $this->createStub(OrganizationStateRepository::class),
+            $this->createStub(ConnectorVersionReader::class),
             $logger
         );
         $service->submit('https://watchtower.test', 'a-real-secret-key', [$this->report(), $this->report()]);
@@ -148,13 +150,56 @@ class MetricsSubmissionServiceTest extends TestCase
         }
     }
 
+    public function testTheSubmittedPayloadCarriesTheConnectorsOwnVersion(): void
+    {
+        $connectorVersionReader = $this->createStub(ConnectorVersionReader::class);
+        $connectorVersionReader->method('version')->willReturn('1.17.0');
+
+        $capturedPayload = null;
+        $client = $this->createMock(Client::class);
+        $client->expects(self::once())->method('post')
+            ->willReturnCallback(function (...$args) use (&$capturedPayload) {
+                $capturedPayload = $args[3];
+
+                return new Response(200, ['accepted' => 1, 'rejected' => []]);
+            });
+
+        $this->service($client, connectorVersionReader: $connectorVersionReader)
+            ->submit('https://watchtower.test', 'a-key', [$this->report()]);
+
+        self::assertSame('1.17.0', $capturedPayload['connector_version']);
+    }
+
+    public function testAnUnresolvableConnectorVersionIsSubmittedAsNull(): void
+    {
+        $connectorVersionReader = $this->createStub(ConnectorVersionReader::class);
+        $connectorVersionReader->method('version')->willReturn(null);
+
+        $capturedPayload = null;
+        $client = $this->createMock(Client::class);
+        $client->expects(self::once())->method('post')
+            ->willReturnCallback(function (...$args) use (&$capturedPayload) {
+                $capturedPayload = $args[3];
+
+                return new Response(200, ['accepted' => 1, 'rejected' => []]);
+            });
+
+        $this->service($client, connectorVersionReader: $connectorVersionReader)
+            ->submit('https://watchtower.test', 'a-key', [$this->report()]);
+
+        self::assertArrayHasKey('connector_version', $capturedPayload);
+        self::assertNull($capturedPayload['connector_version']);
+    }
+
     private function service(
         Client $client,
-        ?OrganizationStateRepository $organizationStateRepository = null
+        ?OrganizationStateRepository $organizationStateRepository = null,
+        ?ConnectorVersionReader $connectorVersionReader = null
     ): MetricsSubmissionService {
         return new MetricsSubmissionService(
             $client,
             $organizationStateRepository ?? $this->createStub(OrganizationStateRepository::class),
+            $connectorVersionReader ?? $this->createStub(ConnectorVersionReader::class),
             $this->createStub(LoggerInterface::class)
         );
     }
