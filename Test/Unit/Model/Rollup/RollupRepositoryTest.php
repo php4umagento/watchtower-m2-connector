@@ -187,6 +187,90 @@ class RollupRepositoryTest extends TestCase
         self::assertSame(3, $result->dailyRowsPruned);
     }
 
+    /**
+     * Regression coverage for the query HistorySeeder::seed()'s automatic
+     * on-enable trigger (ReportingService::seedIfNeverSeeded()) gates on:
+     * a row for ANY of the given categories means "already tracked, don't
+     * re-seed" -- proven here by asserting the exact WHERE/LIMIT shape, not
+     * just the boolean outcome, since a query that silently dropped the
+     * store_view_id filter (or the category IN list) would make this method
+     * return true for the wrong store view or category and permanently skip
+     * seeding a genuinely fresh one.
+     */
+    public function testHasAnyHourlyDataForCategoriesReturnsTrueWhenAMatchingRowExists(): void
+    {
+        $select = $this->createMock(Select::class);
+        $select->expects(self::once())->method('from')->willReturnCallback(
+            function (string $table, array $columns) use ($select): Select {
+                self::assertSame('watchtower_rollup_hourly', $table);
+                self::assertCount(1, $columns);
+                self::assertInstanceOf(\Zend_Db_Expr::class, $columns[0]);
+
+                return $select;
+            }
+        );
+
+        $seenWhere = [];
+        $select->expects(self::exactly(2))->method('where')->willReturnCallback(
+            function (string $condition, mixed $value = null) use ($select, &$seenWhere) {
+                $seenWhere[] = [$condition, $value];
+
+                return $select;
+            }
+        );
+        $select->expects(self::once())->method('limit')->with(1)->willReturnSelf();
+
+        $connection = $this->createStub(AdapterInterface::class);
+        $connection->method('select')->willReturn($select);
+        $connection->method('fetchOne')->willReturn('1');
+
+        $resourceConnection = $this->createStub(ResourceConnection::class);
+        $resourceConnection->method('getConnection')->willReturn($connection);
+        $resourceConnection->method('getTableName')->willReturnArgument(0);
+
+        $result = (new RollupRepository($resourceConnection))->hasAnyHourlyDataForCategories(
+            9,
+            ['basket_quote', 'checkout', 'customer_account']
+        );
+
+        self::assertTrue($result);
+        self::assertSame(['store_view_id = ?', 9], $seenWhere[0]);
+        self::assertSame(
+            ['category IN (?)', ['basket_quote', 'checkout', 'customer_account']],
+            $seenWhere[1]
+        );
+    }
+
+    /**
+     * The false side: a genuinely fresh store view with no rollup rows for
+     * any of the given categories yet must be reported as never-seeded, not
+     * default to "already covered" -- fetchOne() returning MySQL's real
+     * "no row" sentinel (false, not null) is the exact boundary case
+     * ->fetchOne() !== false above guards.
+     */
+    public function testHasAnyHourlyDataForCategoriesReturnsFalseWhenNoRowExists(): void
+    {
+        $select = $this->createStub(Select::class);
+        $select->method('from')->willReturnSelf();
+        $select->method('where')->willReturnSelf();
+        $select->method('limit')->willReturnSelf();
+
+        $connection = $this->createStub(AdapterInterface::class);
+        $connection->method('select')->willReturn($select);
+        $connection->method('fetchOne')->willReturn(false);
+
+        $resourceConnection = $this->createStub(ResourceConnection::class);
+        $resourceConnection->method('getConnection')->willReturn($connection);
+        $resourceConnection->method('getTableName')->willReturnArgument(0);
+
+        $result = (new RollupRepository($resourceConnection))->hasAnyHourlyDataForCategories(
+            9,
+            ['basket_quote', 'checkout', 'customer_account']
+        );
+
+        self::assertFalse($result);
+    }
+
     public function testHourlyCountsForBucketFiltersByHourWeekdayAndLookbackWindowAndMapsResults(): void
     {
         $select = $this->createMock(Select::class);

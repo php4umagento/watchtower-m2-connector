@@ -10,6 +10,7 @@ namespace Watchtower\Connector\Model\Seed;
 
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Store\Model\ScopeInterface;
+use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
@@ -55,6 +56,28 @@ class HistorySeeder
         private readonly RollupRepository $rollupRepository,
         private readonly ScopeConfigInterface $scopeConfig,
     ) {
+    }
+
+    /**
+     * The longest of DispersionEvaluator's own lookback windows, so a new
+     * install accumulates enough rollup history to fill whichever evaluation
+     * actually queries it -- shared by every seed() caller (CoverageCommand's
+     * manual trigger, ReportingService's automatic on-enable trigger) so they
+     * can never drift apart on what "a full baseline" means. Previously a
+     * hand-maintained mirror of BASELINE_WEEKS alone, which meant
+     * LOW_VOLUME_LOOKBACK_WEEKS's wider query window had no real history to
+     * find on a freshly-seeded install regardless of how far back it was
+     * willing to look.
+     *
+     * An instance method, not static -- a static method can't be intercepted
+     * by a Magento plugin, same reasoning this codebase already applies to
+     * avoiding `final` classes (see this repo's own CLAUDE.md).
+     *
+     * @return int
+     */
+    public function defaultBaselineWindowDays(): int
+    {
+        return 7 * max(DispersionEvaluator::BASELINE_WEEKS, DispersionEvaluator::LOW_VOLUME_LOOKBACK_WEEKS);
     }
 
     /**

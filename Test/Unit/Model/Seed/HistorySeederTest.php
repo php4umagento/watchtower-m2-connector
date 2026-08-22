@@ -34,6 +34,21 @@ class HistorySeederTest extends TestCase
     private const NOW_STRING = '2026-08-13T15:00:00+00:00';
     private const STORE_VIEW_ID = 7;
 
+    /**
+     * Shared by CoverageCommand (the manual trigger) and ReportingService
+     * (the automatic on-enable trigger) so the two can never quietly drift
+     * apart on what "a full baseline" means -- 12 weeks
+     * (LOW_VOLUME_LOOKBACK_WEEKS) is the wider of DispersionEvaluator's two
+     * lookback windows, so this must win over the narrower 4-week
+     * BASELINE_WEEKS.
+     */
+    public function testDefaultBaselineWindowDaysIsTheWiderOfDispersionEvaluatorsTwoLookbackWindows(): void
+    {
+        $seeder = $this->buildSeeder(deleteQuoteAfterDays: 30, basketQuoteCount: 0);
+
+        self::assertSame(84, $seeder->defaultBaselineWindowDays());
+    }
+
     public function testBasketQuoteSeedsTheFullBaselineWindowWhenRetentionIsNotBinding(): void
     {
         $seeder = $this->buildSeeder(

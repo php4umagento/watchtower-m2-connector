@@ -28,6 +28,7 @@ use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
+use Watchtower\Connector\Model\Seed\SeedCoverageResult;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
 use Watchtower\Connector\Model\Signal\CustomerAccountRegistrationReader;
@@ -72,6 +73,7 @@ class ReportingService
      * @param CustomerAccountRegistrationReader $customerAccountRegistrationReader
      * @param RollupRepository $rollupRepository
      * @param DispersionEvaluator $dispersionEvaluator
+     * @param HistorySeeder $historySeeder
      * @param IntegrationHealthConfigRepository $integrationHealthConfigRepository
      * @param IntegrationHealthEvaluator $integrationHealthEvaluator
      * @param CronJobObserver $cronJobObserver
@@ -94,6 +96,7 @@ class ReportingService
         private readonly CustomerAccountRegistrationReader $customerAccountRegistrationReader,
         private readonly RollupRepository $rollupRepository,
         private readonly DispersionEvaluator $dispersionEvaluator,
+        private readonly HistorySeeder $historySeeder,
         private readonly IntegrationHealthConfigRepository $integrationHealthConfigRepository,
         private readonly IntegrationHealthEvaluator $integrationHealthEvaluator,
         private readonly CronJobObserver $cronJobObserver,
@@ -325,6 +328,8 @@ class ReportingService
             $storeViewId = (int) $store->getId();
             $storeViewCode = (string) $store->getCode();
 
+            $this->seedIfNeverSeeded($storeViewId, array_keys($readersByCategory), $now);
+
             /**
              * @var string $category
              * @var RateSignalReaderInterface $reader
@@ -355,6 +360,48 @@ class ReportingService
         }
 
         return $reports;
+    }
+
+    /**
+     * Backfills a store view's local rollup history the first time it's ever
+     * evaluated, so DispersionEvaluator classifies against real weeks of
+     * history instead of cold-starting on whatever this cycle records live.
+     * HistorySeeder::seed() was previously only reachable via the manual
+     * `watchtower:coverage` command -- an install that never had it run by
+     * hand cold-started on a near-empty local baseline, exactly the
+     * false-anomaly risk this closes.
+     *
+     * Gated on rollup data already existing for any of the given categories,
+     * not a separate persisted flag: HistorySeeder::seed() is an idempotent
+     * upsert (see CoverageCommand's own docblock), so a redundant re-seed
+     * costs only wasted queries, and this reads the same table the seed
+     * itself writes to rather than inventing new state that could drift out
+     * of sync with it.
+     *
+     * @param int $storeViewId
+     * @param string[] $categories
+     * @param \DateTimeImmutable $now
+     * @return void
+     */
+    private function seedIfNeverSeeded(int $storeViewId, array $categories, \DateTimeImmutable $now): void
+    {
+        if ($this->rollupRepository->hasAnyHourlyDataForCategories($storeViewId, $categories)) {
+            return;
+        }
+
+        $results = $this->historySeeder->seed($storeViewId, $now, $this->historySeeder->defaultBaselineWindowDays());
+
+        $this->logger->info('Watchtower seeded historical baseline for a newly-tracked store view.', [
+            'storeViewId' => $storeViewId,
+            'coverage' => array_map(
+                static fn (SeedCoverageResult $result): array => [
+                    'category' => $result->category,
+                    'status' => $result->status->value,
+                    'daysSeeded' => $result->daysSeeded,
+                ],
+                $results
+            ),
+        ]);
     }
 
     /**

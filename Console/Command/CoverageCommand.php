@@ -13,7 +13,6 @@ use Magento\Store\Model\StoreManagerInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
 use Watchtower\Connector\Model\Seed\SeedCoverageResult;
 use Watchtower\Connector\Model\Seed\SeedCoverageStatus;
@@ -82,7 +81,11 @@ class CoverageCommand extends Command
         foreach ($liveStores as $store) {
             $output->writeln(sprintf('<info>%s (%s):</info>', $store->getName(), $store->getCode()));
 
-            $results = $this->historySeeder->seed((int) $store->getId(), $now, $this->baselineWindowDays());
+            $results = $this->historySeeder->seed(
+                (int) $store->getId(),
+                $now,
+                $this->historySeeder->defaultBaselineWindowDays()
+            );
 
             foreach ($results as $result) {
                 $output->writeln('  '.$this->describe($result));
@@ -90,21 +93,6 @@ class CoverageCommand extends Command
         }
 
         return Command::SUCCESS;
-    }
-
-    /**
-     * The longest of DispersionEvaluator's own lookback windows, so a new
-     * install accumulates enough rollup history to fill whichever one
-     * evaluation actually queries -- previously a hand-maintained mirror of
-     * BASELINE_WEEKS alone, which meant LOW_VOLUME_LOOKBACK_WEEKS's wider
-     * query window had no real history to find on a freshly-seeded install
-     * regardless of how far back it was willing to look.
-     *
-     * @return int
-     */
-    private function baselineWindowDays(): int
-    {
-        return 7 * max(DispersionEvaluator::BASELINE_WEEKS, DispersionEvaluator::LOW_VOLUME_LOOKBACK_WEEKS);
     }
 
     /**
