@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Model\Api;
 
+use Laminas\Http\Client\Adapter\Curl as LaminasCurlAdapter;
 use Laminas\Http\Request;
 use Magento\Framework\HTTP\LaminasClientFactory;
 use Magento\Framework\Serialize\SerializerInterface;
@@ -94,7 +95,22 @@ class Client
             $headers['Content-Type'] = 'application/json';
         }
 
-        $client = $this->httpClientFactory->create();
+        // Magento\Framework\HTTP\LaminasClient hardcodes its own legacy
+        // Magento\Framework\HTTP\Adapter\Curl, which on Magento <=2.4.7
+        // passes associative headers straight to CURLOPT_HTTPHEADER
+        // without converting them to "Name: value" strings first -- curl
+        // silently drops them, including Authorization, so every request
+        // 401s. Fixed upstream in 2.4.8's Adapter\Curl::normalizeHeaders().
+        // Laminas's own Curl adapter has always formatted headers
+        // correctly, so overriding the adapter here fixes every Magento
+        // version without touching Magento's vendor code. Passed through
+        // the factory's own options (not a later setAdapter() call) so
+        // Laminas\Http\Client::getAdapter() lazily builds it only if
+        // nothing else has already set one -- a caller providing its own
+        // pre-configured client (e.g. a test double) is left untouched.
+        $client = $this->httpClientFactory->create([
+            'options' => ['adapter' => LaminasCurlAdapter::class],
+        ]);
         $client->setUri(rtrim($baseUrl, '/') . $path);
         $client->setMethod($method);
         $client->setHeaders($headers);
