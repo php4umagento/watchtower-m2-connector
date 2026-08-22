@@ -113,6 +113,7 @@ class DiagnosticsSnapshotProvider
             category: CronHealthEvaluator::EVENT_TYPE,
             status: $cronHealthState->confirmedStatus,
             sequenceNumber: $cronHealthState->sequenceNumber,
+            reason: $cronHealthState->lastReportedReason,
         );
 
         return new DiagnosticsSnapshot(
@@ -161,6 +162,7 @@ class DiagnosticsSnapshotProvider
                     category: $category,
                     status: $state->confirmedStatus,
                     sequenceNumber: $state->sequenceNumber,
+                    reason: $state->lastReportedReason,
                     estimatedDetectionLatencyHours: $this->dispersionEvaluator->estimatedDetectionLatencyHours(
                         $storeViewId,
                         $category,
@@ -175,6 +177,7 @@ class DiagnosticsSnapshotProvider
                     category: 'integration_health',
                     status: $state->confirmedStatus,
                     sequenceNumber: $state->sequenceNumber,
+                    reason: $state->lastReportedReason,
                 );
             }
 

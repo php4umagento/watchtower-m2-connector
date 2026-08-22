@@ -12,6 +12,7 @@ use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\DB\Select;
 use PHPUnit\Framework\TestCase;
+use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\RateSignal\DispersionState;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
@@ -78,9 +79,10 @@ class DispersionStateRepositoryTest extends TestCase
                     'category' => 'checkout',
                     'pending_status' => 'MILD_DROP',
                     'confirmed_status' => null,
+                    'last_reported_reason' => 'transition',
                     'sequence_number' => 5,
                 ],
-                ['pending_status', 'confirmed_status', 'sequence_number']
+                ['pending_status', 'confirmed_status', 'last_reported_reason', 'sequence_number']
             );
 
         $resourceConnection = $this->createStub(ResourceConnection::class);
@@ -93,6 +95,7 @@ class DispersionStateRepositoryTest extends TestCase
             pendingStatus: SignalStatus::MildDrop,
             confirmedStatus: null,
             sequenceNumber: 5,
+            lastReportedReason: ReportReason::Transition,
         );
 
         (new DispersionStateRepository($resourceConnection))->save($state);

@@ -5,6 +5,14 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.15.0] - 2026-08-22
+
+The admin diagnostics page and `watchtower:status` now show the reason
+(heartbeat or transition) behind every signal's last reported status, not
+just the status itself. Adds a `last_reported_reason` column to all three
+signal state tables (`watchtower_health_state`, `watchtower_dispersion_state`,
+`watchtower_integration_health_state`); run `setup:upgrade`.
+
 ## [1.14.0] - 2026-08-22
 
 The admin diagnostics page and `watchtower:status` now show a store's

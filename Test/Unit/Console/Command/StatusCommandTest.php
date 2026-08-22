@@ -11,6 +11,7 @@ namespace Watchtower\Connector\Test\Unit\Console\Command;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Tester\CommandTester;
 use Watchtower\Connector\Console\Command\StatusCommand;
+use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\Api\MagentoEolInfo;
@@ -85,12 +86,17 @@ class StatusCommandTest extends TestCase
             lastSuccessfulSubmissionAt: new \DateTimeImmutable('2026-08-14T10:00:00+00:00'),
             bufferedReportCount: 0,
             droppedEventCountLast24Hours: 0,
-            cronHealth: new SignalSnapshot('cron_health', SignalStatus::Normal, 12),
+            cronHealth: new SignalSnapshot('cron_health', SignalStatus::Normal, 12, ReportReason::Heartbeat),
             storeViews: [
                 new StoreViewSnapshot(1, 'default', [
-                    new SignalSnapshot('basket_quote', SignalStatus::InsufficientData, 1),
-                    new SignalSnapshot('checkout', SignalStatus::InsufficientData, 1),
-                    new SignalSnapshot('customer_account', SignalStatus::InsufficientData, 1),
+                    new SignalSnapshot('basket_quote', SignalStatus::InsufficientData, 1, ReportReason::Transition),
+                    new SignalSnapshot('checkout', SignalStatus::InsufficientData, 1, ReportReason::Transition),
+                    new SignalSnapshot(
+                        'customer_account',
+                        SignalStatus::InsufficientData,
+                        1,
+                        ReportReason::Transition
+                    ),
                 ]),
             ],
             recentSubmissionOutcomes: [],
@@ -102,11 +108,17 @@ class StatusCommandTest extends TestCase
         $tester->execute([]);
 
         $display = $tester->getDisplay();
-        self::assertStringContainsString('cron_health: NORMAL (sequence 12)', $display);
+        self::assertStringContainsString('cron_health: NORMAL (sequence 12, reason: heartbeat)', $display);
         self::assertStringContainsString('Store view "default" (id=1):', $display);
-        self::assertStringContainsString('basket_quote: INSUFFICIENT_DATA (sequence 1)', $display);
-        self::assertStringContainsString('checkout: INSUFFICIENT_DATA (sequence 1)', $display);
-        self::assertStringContainsString('customer_account: INSUFFICIENT_DATA (sequence 1)', $display);
+        self::assertStringContainsString(
+            'basket_quote: INSUFFICIENT_DATA (sequence 1, reason: transition)',
+            $display
+        );
+        self::assertStringContainsString('checkout: INSUFFICIENT_DATA (sequence 1, reason: transition)', $display);
+        self::assertStringContainsString(
+            'customer_account: INSUFFICIENT_DATA (sequence 1, reason: transition)',
+            $display
+        );
     }
 
     public function testPrintsEstimatedDetectionLatencyOnlyForALowVolumeSignal(): void
@@ -122,8 +134,14 @@ class StatusCommandTest extends TestCase
             cronHealth: new SignalSnapshot('cron_health', SignalStatus::Normal, 12),
             storeViews: [
                 new StoreViewSnapshot(1, 'default', [
-                    new SignalSnapshot('basket_quote', SignalStatus::Normal, 5, 18.73),
-                    new SignalSnapshot('checkout', SignalStatus::InsufficientData, 1),
+                    new SignalSnapshot(
+                        'basket_quote',
+                        SignalStatus::Normal,
+                        5,
+                        ReportReason::Heartbeat,
+                        estimatedDetectionLatencyHours: 18.73
+                    ),
+                    new SignalSnapshot('checkout', SignalStatus::InsufficientData, 1, ReportReason::Transition),
                 ]),
             ],
             recentSubmissionOutcomes: [],
@@ -136,11 +154,17 @@ class StatusCommandTest extends TestCase
 
         $display = $tester->getDisplay();
         self::assertStringContainsString(
-            'basket_quote: NORMAL (sequence 5), ~19h to detect a full outage (low-volume mode)',
+            'basket_quote: NORMAL (sequence 5, reason: heartbeat), ~19h to detect a full outage (low-volume mode)',
             $display
         );
-        self::assertStringContainsString('checkout: INSUFFICIENT_DATA (sequence 1)', $display);
-        self::assertStringNotContainsString('checkout: INSUFFICIENT_DATA (sequence 1), ~', $display);
+        self::assertStringContainsString(
+            'checkout: INSUFFICIENT_DATA (sequence 1, reason: transition)',
+            $display
+        );
+        self::assertStringNotContainsString(
+            'checkout: INSUFFICIENT_DATA (sequence 1, reason: transition), ~',
+            $display
+        );
     }
 
     public function testPrintsNoOutcomesRecordedYetWhenNoneExist(): void

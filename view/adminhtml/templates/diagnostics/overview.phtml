@@ -171,6 +171,7 @@ $versionState = $snapshot->connectorVersion;
             <tr>
                 <th class="data-grid-th"><?= $escaper->escapeHtml(__('Signal')) ?></th>
                 <th class="data-grid-th"><?= $escaper->escapeHtml(__('Status')) ?></th>
+                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Reason')) ?></th>
                 <th class="data-grid-th"><?= $escaper->escapeHtml(__('Sequence Number')) ?></th>
             </tr>
             </thead>
@@ -181,6 +182,7 @@ $versionState = $snapshot->connectorVersion;
                     (<?= $escaper->escapeHtml(__('install-wide')) ?>)
                 </td>
                 <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($snapshot->cronHealth)) ?></td>
+                <td class="data-grid-td"><?= $escaper->escapeHtml($block->reasonLabel($snapshot->cronHealth)) ?></td>
                 <td class="data-grid-td">
                     <?= $escaper->escapeHtml((string) $snapshot->cronHealth->sequenceNumber) ?>
                 </td>
@@ -212,6 +214,7 @@ $versionState = $snapshot->connectorVersion;
                         <tr>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Signal')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Status')) ?></th>
+                            <th class="data-grid-th"><?= $escaper->escapeHtml(__('Reason')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Sequence Number')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Outage Detection')) ?></th>
                         </tr>
@@ -221,6 +224,7 @@ $versionState = $snapshot->connectorVersion;
                             <tr>
                                 <td class="data-grid-td"><?= $escaper->escapeHtml($signal->category) ?></td>
                                 <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($signal)) ?></td>
+                                <td class="data-grid-td"><?= $escaper->escapeHtml($block->reasonLabel($signal)) ?></td>
                                 <td class="data-grid-td">
                                     <?= $escaper->escapeHtml((string) $signal->sequenceNumber) ?>
                                 </td>

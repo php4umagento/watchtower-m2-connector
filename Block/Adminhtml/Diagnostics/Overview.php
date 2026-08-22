@@ -86,6 +86,17 @@ class Overview extends Template
     }
 
     /**
+     * The reason label for a signal's last report, or a fallback for one never reported.
+     *
+     * @param SignalSnapshot $signal
+     * @return string
+     */
+    public function reasonLabel(SignalSnapshot $signal): string
+    {
+        return $signal->reason?->value ?? 'no data yet';
+    }
+
+    /**
      * A signal's estimated detection latency for a full outage, rendered as
      * e.g. "~19h (low-volume mode)", or an empty string when the signal
      * isn't in Low-Volume Signal Mode -- most signals never show this.

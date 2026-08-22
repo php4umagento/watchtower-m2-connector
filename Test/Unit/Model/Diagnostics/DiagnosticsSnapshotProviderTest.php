@@ -12,6 +12,7 @@ use Magento\Store\Model\StoreManagerInterface;
 use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\Api\PingResult;
 use Watchtower\Connector\Model\Api\PingService;
+use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
@@ -113,6 +114,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
                 pendingStatus: null,
                 confirmedStatus: SignalStatus::Normal,
                 sequenceNumber: 12,
+                lastReportedReason: ReportReason::Heartbeat,
             )
         );
 
@@ -121,6 +123,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         self::assertSame(CronHealthEvaluator::EVENT_TYPE, $snapshot->cronHealth->category);
         self::assertSame(SignalStatus::Normal, $snapshot->cronHealth->status);
         self::assertSame(12, $snapshot->cronHealth->sequenceNumber);
+        self::assertSame(ReportReason::Heartbeat, $snapshot->cronHealth->reason);
     }
 
     /**
@@ -142,6 +145,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
                 pendingStatus: null,
                 confirmedStatus: SignalStatus::InsufficientData,
                 sequenceNumber: 1,
+                lastReportedReason: ReportReason::Transition,
             )
         );
 
@@ -165,6 +169,10 @@ class DiagnosticsSnapshotProviderTest extends TestCase
                 HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT,
             ],
             array_map(static fn ($signal) => $signal->category, $storeView->signals)
+        );
+        self::assertSame(
+            [ReportReason::Transition, ReportReason::Transition, ReportReason::Transition],
+            array_map(static fn ($signal) => $signal->reason, $storeView->signals)
         );
     }
 
@@ -254,6 +262,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             pendingStatus: null,
             confirmedStatus: SignalStatus::Normal,
             sequenceNumber: 3,
+            lastReportedReason: ReportReason::Heartbeat,
         ));
 
         $snapshot = $this->provider(
@@ -268,6 +277,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         self::assertSame('integration_health', $signals[3]->category);
         self::assertSame(SignalStatus::Normal, $signals[3]->status);
         self::assertSame(3, $signals[3]->sequenceNumber);
+        self::assertSame(ReportReason::Heartbeat, $signals[3]->reason);
     }
 
     /**
