@@ -196,6 +196,7 @@ class LeakTest extends TestCase
         $service = new MetricsSubmissionService(
             $client,
             $this->noOpOrganizationStateRepository(),
+            $this->createStub(ConnectorVersionReader::class),
             $this->createStub(LoggerInterface::class)
         );
         $service->submit('https://watchtower.test', 'secret-api-key-value', [$report]);
@@ -245,6 +246,7 @@ class LeakTest extends TestCase
         $service = new MetricsSubmissionService(
             $client,
             $this->noOpOrganizationStateRepository(),
+            $this->createStub(ConnectorVersionReader::class),
             $this->createStub(LoggerInterface::class)
         );
         $service->submit('https://watchtower.test', $apiKey, [$report]);
@@ -325,6 +327,7 @@ class LeakTest extends TestCase
         $service = new MetricsSubmissionService(
             $client,
             $this->noOpOrganizationStateRepository(),
+            $this->createStub(ConnectorVersionReader::class),
             $this->createStub(LoggerInterface::class)
         );
         $service->submit('https://watchtower.test', 'secret-api-key-value', [$report]);

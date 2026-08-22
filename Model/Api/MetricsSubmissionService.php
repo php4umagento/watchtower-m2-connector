@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace Watchtower\Connector\Model\Api;
 
 use Psr\Log\LoggerInterface;
+use Watchtower\Connector\Model\Environment\ConnectorVersionReader;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 
 /**
@@ -23,11 +24,13 @@ class MetricsSubmissionService
     /**
      * @param Client $client
      * @param OrganizationStateRepository $organizationStateRepository
+     * @param ConnectorVersionReader $connectorVersionReader
      * @param LoggerInterface $logger
      */
     public function __construct(
         private readonly Client $client,
         private readonly OrganizationStateRepository $organizationStateRepository,
+        private readonly ConnectorVersionReader $connectorVersionReader,
         private readonly LoggerInterface $logger
     ) {
     }
@@ -44,6 +47,11 @@ class MetricsSubmissionService
     {
         $payload = [
             'reports' => array_map($this->describeReport(...), $reports),
+            // Refreshes Install::connector_version on the platform every
+            // cycle (roughly hourly), instead of only on the once-daily
+            // /api/installs/sync run. See docs/connector-metrics-spec.md
+            // (2.5) in the watchtower-saas repo.
+            'connector_version' => $this->connectorVersionReader->version(),
         ];
 
         $this->logger->debug('Watchtower submitting metric reports.', ['count' => count($reports)]);
