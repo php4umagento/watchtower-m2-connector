@@ -5,6 +5,14 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.12.0] - 2026-08-22
+
+Seeds a store view's historical baseline automatically the first time it's
+evaluated, instead of only via the manual `watchtower:coverage` command --
+an install that never had it run by hand previously cold-started on
+whatever the live cycle collected from scratch, risking a false anomaly
+off a few hours of noise instead of a real baseline.
+
 ## [1.11.0] - 2026-08-22
 
 Fixes a false "back to normal" email on a brand-new install or store view:
