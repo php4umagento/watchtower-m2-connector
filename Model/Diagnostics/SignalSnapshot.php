@@ -26,6 +26,9 @@ class SignalSnapshot
      *     signal currently in Low-Volume Signal Mode with enough history to estimate one --
      *     null for cron_health/integration_health (not rate-based) and for a signal that
      *     isn't in Low-Volume Signal Mode or is still INSUFFICIENT_DATA
+     * @param string[] $ensembleDrivingChecks which named checks (dispersion, seasonal, trend)
+     *     drove the most recent raw classification; always empty for cron_health/integration_health
+     *     (no ensemble) and for a rate-based signal on the inter-arrival (low-volume) path instead
      */
     public function __construct(
         public readonly string $category,
@@ -33,6 +36,7 @@ class SignalSnapshot
         public readonly int $sequenceNumber,
         public readonly ?ReportReason $reason = null,
         public readonly ?float $estimatedDetectionLatencyHours = null,
+        public readonly array $ensembleDrivingChecks = [],
     ) {
     }
 }

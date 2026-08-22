@@ -227,6 +227,49 @@ class DiagnosticsSnapshotProviderTest extends TestCase
     }
 
     /**
+     * ensembleDrivingChecks comes straight off DispersionState, unlike
+     * estimatedDetectionLatencyHours which is a separate DispersionEvaluator
+     * query -- proves the read-only state field itself reaches the snapshot.
+     */
+    public function testEnsembleDrivingChecksIsThreadedOntoTheMatchingSignalSnapshot(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $dispersionStateRepository = $this->createStub(DispersionStateRepository::class);
+        $dispersionStateRepository->method('get')->willReturnCallback(
+            fn (int $storeViewId, string $category) => new DispersionState(
+                storeViewId: $storeViewId,
+                category: $category,
+                pendingStatus: null,
+                confirmedStatus: SignalStatus::SevereDrop,
+                sequenceNumber: 5,
+                ensembleDrivingChecks: $category === HistorySeeder::CATEGORY_BASKET_QUOTE
+                    ? ['seasonal', 'trend']
+                    : []
+            )
+        );
+
+        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
+        $integrationHealthConfigRepository->method('get')->willReturn(null);
+
+        $snapshot = $this->provider(
+            storeManager: $storeManager,
+            dispersionStateRepository: $dispersionStateRepository,
+            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+        )->snapshot($this->now());
+
+        $byCategory = [];
+        foreach ($snapshot->storeViews[0]->signals as $signal) {
+            $byCategory[$signal->category] = $signal->ensembleDrivingChecks;
+        }
+
+        self::assertSame(['seasonal', 'trend'], $byCategory[HistorySeeder::CATEGORY_BASKET_QUOTE]);
+        self::assertSame([], $byCategory[HistorySeeder::CATEGORY_CHECKOUT]);
+        self::assertSame([], $byCategory[HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT]);
+    }
+
+    /**
      * A store view WITH a configured integration_health source gets a 4th
      * signal for it; one WITHOUT does not -- the config repository's
      * get() returning null is exactly the gate DiagnosticsSnapshotProvider

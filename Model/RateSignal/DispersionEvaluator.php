@@ -200,7 +200,7 @@ class DispersionEvaluator
         \DateTimeImmutable $evaluatedAt
     ): MetricReport {
         $state = $this->repository->get($storeViewId, $category);
-        $rawStatus = $this->rawStatus($storeViewId, $category, $observedCount, $evaluatedHour);
+        [$rawStatus, $drivingChecks] = $this->rawStatus($storeViewId, $category, $observedCount, $evaluatedHour);
 
         // First evaluation for this pair: nothing to debounce against yet.
         if ($state->isFirstEvaluation()) {
@@ -210,7 +210,8 @@ class DispersionEvaluator
                 null,
                 SignalStatus::InsufficientData,
                 $state->sequenceNumber + 1,
-                ReportReason::Transition
+                ReportReason::Transition,
+                $drivingChecks
             );
 
             return $this->report(
@@ -231,7 +232,8 @@ class DispersionEvaluator
                 null,
                 $state->confirmedStatus,
                 $state->sequenceNumber + 1,
-                ReportReason::Heartbeat
+                ReportReason::Heartbeat,
+                $drivingChecks
             );
 
             return $this->report(
@@ -259,7 +261,15 @@ class DispersionEvaluator
                 : ReportReason::Transition;
 
             // Second consecutive differing tick: confirm using the current raw status.
-            $this->save($storeViewId, $category, null, $rawStatus, $state->sequenceNumber + 1, $reason);
+            $this->save(
+                $storeViewId,
+                $category,
+                null,
+                $rawStatus,
+                $state->sequenceNumber + 1,
+                $reason,
+                $drivingChecks
+            );
 
             return $this->report(
                 $storeViewCode,
@@ -278,7 +288,8 @@ class DispersionEvaluator
             $rawStatus,
             $state->confirmedStatus,
             $state->sequenceNumber + 1,
-            ReportReason::Heartbeat
+            ReportReason::Heartbeat,
+            $drivingChecks
         );
 
         return $this->report(
@@ -303,14 +314,16 @@ class DispersionEvaluator
      * @param string $category
      * @param int $observedCount
      * @param \DateTimeImmutable $evaluatedHour top-of-hour instant of the completed hour being evaluated
-     * @return SignalStatus
+     * @return array{0: SignalStatus, 1: string[]} the classification and which named checks
+     *     (dispersion, seasonal, trend) drove it -- empty for the inter-arrival (low-volume) path,
+     *     which has no ensemble to attribute to
      */
     private function rawStatus(
         int $storeViewId,
         string $category,
         int $observedCount,
         \DateTimeImmutable $evaluatedHour
-    ): SignalStatus {
+    ): array {
         $samples = $this->historicalSamples($storeViewId, $category, $evaluatedHour);
 
         if (count($samples) >= self::MIN_HISTORICAL_SAMPLES) {
@@ -325,7 +338,7 @@ class DispersionEvaluator
         }
 
         // Too little history, or this signal's typical rate is below the volume floor: use the inter-arrival path.
-        return $this->interArrivalRawStatus($storeViewId, $category, $evaluatedHour, $observedCount);
+        return [$this->interArrivalRawStatus($storeViewId, $category, $evaluatedHour, $observedCount), []];
     }
 
     /**
@@ -342,7 +355,7 @@ class DispersionEvaluator
      * @param int $observedCount
      * @param float $median Check A's own bucket-conditioned median
      * @param float $mad Check A's own (already MAD_CONTINUITY_FLOOR-floored) median absolute deviation
-     * @return SignalStatus
+     * @return array{0: SignalStatus, 1: string[]} the classification and which active checks voted for it
      */
     private function ensembleClassify(
         int $storeViewId,
@@ -351,10 +364,13 @@ class DispersionEvaluator
         int $observedCount,
         float $median,
         float $mad
-    ): SignalStatus {
+    ): array {
         $checkA = $this->classify(0.6745 * ($observedCount - $median) / $mad);
 
-        $activeVotes = [$checkA];
+        // Named, not just voted: which check(s) drove the final verdict is
+        // exactly what a merchant or support asks first when a status looks
+        // surprising given raw intuition about their own traffic.
+        $activeVotes = ['dispersion' => $checkA];
 
         $seasonalExpected = $this->seasonalIndexEvaluator->adjustedExpectedValue(
             $storeViewId,
@@ -364,7 +380,7 @@ class DispersionEvaluator
         );
 
         if ($seasonalExpected !== null) {
-            $activeVotes[] = $this->classify(0.6745 * ($observedCount - $seasonalExpected) / $mad);
+            $activeVotes['seasonal'] = $this->classify(0.6745 * ($observedCount - $seasonalExpected) / $mad);
         }
 
         $trendExpected = $this->trendAdjustmentEvaluator->adjustedExpectedValue(
@@ -375,11 +391,11 @@ class DispersionEvaluator
         );
 
         if ($trendExpected !== null) {
-            $activeVotes[] = $this->classify(0.6745 * ($observedCount - $trendExpected) / $mad);
+            $activeVotes['trend'] = $this->classify(0.6745 * ($observedCount - $trendExpected) / $mad);
         }
 
         if (count($activeVotes) === 1) {
-            return $checkA;
+            return [$checkA, ['dispersion']];
         }
 
         $voteCounts = [];
@@ -392,11 +408,17 @@ class DispersionEvaluator
 
         foreach ($voteCounts as $statusValue => $count) {
             if ($count >= $majorityThreshold) {
-                return SignalStatus::from($statusValue);
+                $winner = SignalStatus::from($statusValue);
+                $drivingChecks = array_keys(array_filter(
+                    $activeVotes,
+                    static fn (SignalStatus $vote): bool => $vote === $winner
+                ));
+
+                return [$winner, $drivingChecks];
             }
         }
 
-        return $checkA;
+        return [$checkA, ['dispersion']];
     }
 
     /**
@@ -739,6 +761,8 @@ class DispersionEvaluator
      * @param SignalStatus|null $confirmedStatus
      * @param int $sequenceNumber
      * @param ReportReason $reason the reason for the report this tick actually produces
+     * @param string[] $drivingChecks which named checks (dispersion, seasonal, trend) drove
+     *     this tick's raw classification -- empty for the inter-arrival (low-volume) path
      * @return void
      */
     private function save(
@@ -748,6 +772,7 @@ class DispersionEvaluator
         ?SignalStatus $confirmedStatus,
         int $sequenceNumber,
         ReportReason $reason,
+        array $drivingChecks = [],
     ): void {
         $this->repository->save(new DispersionState(
             storeViewId: $storeViewId,
@@ -756,6 +781,7 @@ class DispersionEvaluator
             confirmedStatus: $confirmedStatus,
             sequenceNumber: $sequenceNumber,
             lastReportedReason: $reason,
+            ensembleDrivingChecks: $drivingChecks,
         ));
     }
 

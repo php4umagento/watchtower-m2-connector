@@ -148,13 +148,18 @@ class StatusCommand extends Command
                     )
                     : '';
 
+                $attribution = $signal->ensembleDrivingChecks !== []
+                    ? sprintf(', driven by: %s', implode(', ', $signal->ensembleDrivingChecks))
+                    : '';
+
                 $output->writeln(sprintf(
-                    '  %s: %s (sequence %d, reason: %s)%s',
+                    '  %s: %s (sequence %d, reason: %s)%s%s',
                     $signal->category,
                     $signal->status?->value ?? 'no data yet',
                     $signal->sequenceNumber,
                     $signal->reason?->value ?? 'no data yet',
-                    $latency
+                    $latency,
+                    $attribution
                 ));
             }
         }

@@ -58,6 +58,7 @@ class DispersionStateRepositoryTest extends TestCase
             'pending_status' => 'MILD_DROP',
             'confirmed_status' => 'NORMAL',
             'sequence_number' => '7',
+            'ensemble_driving_checks' => 'dispersion,seasonal',
         ]);
 
         $state = $repository->get(7, 'checkout');
@@ -65,6 +66,26 @@ class DispersionStateRepositoryTest extends TestCase
         self::assertSame(SignalStatus::MildDrop, $state->pendingStatus);
         self::assertSame(SignalStatus::Normal, $state->confirmedStatus);
         self::assertSame(7, $state->sequenceNumber);
+        self::assertSame(['dispersion', 'seasonal'], $state->ensembleDrivingChecks);
+    }
+
+    /**
+     * A NULL/empty ensemble_driving_checks column (a signal that has never
+     * gone through the ensemble, e.g. still on the low-volume path) must map
+     * to an empty array, not [''] from a naive explode() on an empty string.
+     */
+    public function testGetMapsAnEmptyEnsembleDrivingChecksColumnToAnEmptyArray(): void
+    {
+        $repository = $this->repositoryReturning(fetchRowResult: [
+            'pending_status' => null,
+            'confirmed_status' => 'INSUFFICIENT_DATA',
+            'sequence_number' => '2',
+            'ensemble_driving_checks' => null,
+        ]);
+
+        $state = $repository->get(7, 'checkout');
+
+        self::assertSame([], $state->ensembleDrivingChecks);
     }
 
     public function testSavePersistsEveryFieldIncludingNullsThroughInsertOnDuplicate(): void
@@ -80,9 +101,16 @@ class DispersionStateRepositoryTest extends TestCase
                     'pending_status' => 'MILD_DROP',
                     'confirmed_status' => null,
                     'last_reported_reason' => 'transition',
+                    'ensemble_driving_checks' => 'dispersion,trend',
                     'sequence_number' => 5,
                 ],
-                ['pending_status', 'confirmed_status', 'last_reported_reason', 'sequence_number']
+                [
+                    'pending_status',
+                    'confirmed_status',
+                    'last_reported_reason',
+                    'ensemble_driving_checks',
+                    'sequence_number',
+                ]
             );
 
         $resourceConnection = $this->createStub(ResourceConnection::class);
@@ -96,6 +124,41 @@ class DispersionStateRepositoryTest extends TestCase
             confirmedStatus: null,
             sequenceNumber: 5,
             lastReportedReason: ReportReason::Transition,
+            ensembleDrivingChecks: ['dispersion', 'trend'],
+        );
+
+        (new DispersionStateRepository($resourceConnection))->save($state);
+    }
+
+    /**
+     * An empty ensembleDrivingChecks array (the inter-arrival/low-volume
+     * path, which has no ensemble) must persist as NULL, not an empty
+     * string -- implode('', []) === '' would otherwise round-trip
+     * indistinguishably from a genuinely-empty-but-present value.
+     */
+    public function testSavePersistsAnEmptyDrivingChecksArrayAsNullNotAnEmptyString(): void
+    {
+        $connection = $this->createMock(AdapterInterface::class);
+        $connection->expects(self::once())
+            ->method('insertOnDuplicate')
+            ->with(
+                'watchtower_dispersion_state',
+                self::callback(static fn (array $data): bool => $data['ensemble_driving_checks'] === null),
+                self::anything()
+            );
+
+        $resourceConnection = $this->createStub(ResourceConnection::class);
+        $resourceConnection->method('getConnection')->willReturn($connection);
+        $resourceConnection->method('getTableName')->willReturn('watchtower_dispersion_state');
+
+        $state = new DispersionState(
+            storeViewId: 7,
+            category: 'checkout',
+            pendingStatus: null,
+            confirmedStatus: SignalStatus::SevereDrop,
+            sequenceNumber: 5,
+            lastReportedReason: ReportReason::Heartbeat,
+            ensembleDrivingChecks: [],
         );
 
         (new DispersionStateRepository($resourceConnection))->save($state);

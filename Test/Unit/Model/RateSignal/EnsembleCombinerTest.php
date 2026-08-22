@@ -48,9 +48,10 @@ class EnsembleCombinerTest extends TestCase
 
     public function testOnlyCheckAActiveStandsAlone(): void
     {
-        $status = $this->ensembleStatus(seasonalVote: null, trendVote: null);
+        [$status, $drivingChecks] = $this->ensembleResult(seasonalVote: null, trendVote: null);
 
         self::assertSame(SignalStatus::Normal, $status);
+        self::assertSame(['dispersion'], $drivingChecks);
     }
 
     public function testTwoActiveChecksThatAgreeFormAMajority(): void
@@ -58,19 +59,22 @@ class EnsembleCombinerTest extends TestCase
         // Check A votes Normal (fixed); Check B independently also votes
         // Normal (expected == observed, z = 0); Check C abstains. 2-of-2
         // agreement, not the trivial "only Check A" path.
-        $status = $this->ensembleStatus(seasonalVote: SignalStatus::Normal, trendVote: null);
+        [$status, $drivingChecks] = $this->ensembleResult(seasonalVote: SignalStatus::Normal, trendVote: null);
 
         self::assertSame(SignalStatus::Normal, $status);
+        self::assertSame(['dispersion', 'seasonal'], $drivingChecks);
     }
 
     public function testTwoActiveChecksThatDisagreeWithNoThirdVoteDefersToCheckA(): void
     {
         // Check A votes Normal; Check B votes SevereDrop; Check C abstains.
         // A 1-1 split with only 2 active checks has no majority -> defers
-        // to Check A, never to B alone.
-        $status = $this->ensembleStatus(seasonalVote: SignalStatus::SevereDrop, trendVote: null);
+        // to Check A, never to B alone -- and attribution reflects that:
+        // only dispersion, not seasonal, drove the verdict.
+        [$status, $drivingChecks] = $this->ensembleResult(seasonalVote: SignalStatus::SevereDrop, trendVote: null);
 
         self::assertSame(SignalStatus::Normal, $status);
+        self::assertSame(['dispersion'], $drivingChecks);
     }
 
     public function testThreeActiveChecksWithATwoOfThreeMajorityOverridesCheckAsOwnRawVerdict(): void
@@ -78,20 +82,29 @@ class EnsembleCombinerTest extends TestCase
         // Check A votes Normal; Check B and Check C both independently
         // vote SevereDrop. 2 of 3 is a strict majority, so the ensemble's
         // FINAL verdict is SevereDrop, genuinely overriding Check A's own
-        // raw classification.
-        $status = $this->ensembleStatus(seasonalVote: SignalStatus::SevereDrop, trendVote: SignalStatus::SevereDrop);
+        // raw classification -- attribution names the two that actually
+        // agreed on it, not dispersion, which voted the other way.
+        [$status, $drivingChecks] = $this->ensembleResult(
+            seasonalVote: SignalStatus::SevereDrop,
+            trendVote: SignalStatus::SevereDrop
+        );
 
         self::assertSame(SignalStatus::SevereDrop, $status);
+        self::assertSame(['seasonal', 'trend'], $drivingChecks);
     }
 
     public function testThreeActiveChecksAllDisagreeingHasNoMajorityAndDefersToCheckA(): void
     {
         // Check A votes Normal; Check B votes SevereDrop; Check C votes
         // MildSpike. Three genuinely distinct votes, no pair agrees -> no
-        // majority -> defers to Check A.
-        $status = $this->ensembleStatus(seasonalVote: SignalStatus::SevereDrop, trendVote: SignalStatus::MildSpike);
+        // majority -> defers to Check A, and attribution reflects only that.
+        [$status, $drivingChecks] = $this->ensembleResult(
+            seasonalVote: SignalStatus::SevereDrop,
+            trendVote: SignalStatus::MildSpike
+        );
 
         self::assertSame(SignalStatus::Normal, $status);
+        self::assertSame(['dispersion'], $drivingChecks);
     }
 
     /**
@@ -173,8 +186,12 @@ class EnsembleCombinerTest extends TestCase
      * $trendVote (null = abstain), via an adjusted expected value chosen
      * to classify to that exact status against the SAME mad/observedCount
      * Check A itself uses.
+     *
+     * @param SignalStatus|null $seasonalVote
+     * @param SignalStatus|null $trendVote
+     * @return array{0: SignalStatus, 1: string[]}
      */
-    private function ensembleStatus(?SignalStatus $seasonalVote, ?SignalStatus $trendVote): SignalStatus
+    private function ensembleResult(?SignalStatus $seasonalVote, ?SignalStatus $trendVote): array
     {
         $now = new \DateTimeImmutable(self::NOW_STRING);
 
@@ -238,8 +255,12 @@ class EnsembleCombinerTest extends TestCase
         // it is recoverable either way: if raw === confirmed, the saved
         // state's own confirmedStatus IS the raw value (unchanged); if
         // raw differs, the saved state's pendingStatus holds the raw
-        // value directly (first differing tick).
-        return $savedState->pendingStatus ?? $savedState->confirmedStatus;
+        // value directly (first differing tick). ensembleDrivingChecks is
+        // persisted on every tick regardless of branch, so it needs no
+        // equivalent fallback.
+        $status = $savedState->pendingStatus ?? $savedState->confirmedStatus;
+
+        return [$status, $savedState->ensembleDrivingChecks];
     }
 
     /**

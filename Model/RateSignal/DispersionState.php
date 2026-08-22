@@ -25,6 +25,9 @@ class DispersionState
      * @param SignalStatus|null $confirmedStatus
      * @param int $sequenceNumber
      * @param ReportReason|null $lastReportedReason null only when no evaluation has ever run
+     * @param string[] $ensembleDrivingChecks which named checks (dispersion, seasonal, trend) drove
+     *     the most recent raw classification; empty when it came from the inter-arrival
+     *     (low-volume) path instead of the ensemble, or when no evaluation has ever run
      */
     public function __construct(
         public readonly int $storeViewId,
@@ -33,6 +36,7 @@ class DispersionState
         public readonly ?SignalStatus $confirmedStatus,
         public readonly int $sequenceNumber,
         public readonly ?ReportReason $lastReportedReason = null,
+        public readonly array $ensembleDrivingChecks = [],
     ) {
     }
 
