@@ -5,6 +5,16 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.13.0] - 2026-08-22
+
+Low-Volume Signal Mode now reports `INSUFFICIENT_DATA` instead of a
+percentile-based verdict when a signal's estimated daily volume is below 5
+orders/day, the floor the spec's own simulation actually validated. A
+near-dormant store view with only a handful of historical events could
+otherwise report `SEVERE_DROP` off a gap distribution too thin to mean
+anything, the moment its already-typical silence passed the small sample's
+own maximum. `ruleset_version` bumps to 1.4.0.
+
 ## [1.12.0] - 2026-08-22
 
 Seeds a store view's historical baseline automatically the first time it's
