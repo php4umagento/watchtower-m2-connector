@@ -86,6 +86,21 @@
             "PRIMARY": true
         }
     },
+    "watchtower_seed_coverage": {
+        "column": {
+            "store_view_id": true,
+            "category": true,
+            "status": true,
+            "requested_days": true,
+            "days_seeded": true,
+            "limit_reason": true,
+            "source_retention_days": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
     "watchtower_event_counter": {
         "column": {
             "store_view_id": true,

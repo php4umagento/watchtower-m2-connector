@@ -13,6 +13,8 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Tester\CommandTester;
 use Watchtower\Connector\Console\Command\CoverageCommand;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
+use Watchtower\Connector\Model\Seed\SeedCoverageLabel;
+use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
 use Watchtower\Connector\Model\Seed\SeedCoverageResult;
 use Watchtower\Connector\Model\Seed\SeedCoverageStatus;
 use Watchtower\Connector\Model\Seed\SeedLimitReason;
@@ -40,19 +42,21 @@ class CoverageCommandTest extends TestCase
         // must be stubbed for the ->with() assertion below to reflect what
         // CoverageCommand actually passes.
         $historySeeder->method('defaultBaselineWindowDays')->willReturn(84);
+        $result = new SeedCoverageResult(
+            category: HistorySeeder::CATEGORY_BASKET_QUOTE,
+            requestedDays: 84,
+            daysSeeded: 26,
+            status: SeedCoverageStatus::Seeded,
+        );
         $historySeeder->expects($this->once())
             ->method('seed')
             ->with(1, $this->isInstanceOf(\DateTimeImmutable::class), 84)
-            ->willReturn([
-                HistorySeeder::CATEGORY_BASKET_QUOTE => new SeedCoverageResult(
-                    category: HistorySeeder::CATEGORY_BASKET_QUOTE,
-                    requestedDays: 84,
-                    daysSeeded: 26,
-                    status: SeedCoverageStatus::Seeded,
-                ),
-            ]);
+            ->willReturn([HistorySeeder::CATEGORY_BASKET_QUOTE => $result]);
 
-        $tester = new CommandTester(new CoverageCommand($historySeeder, $storeManager));
+        $seedCoverageRepository = $this->createMock(SeedCoverageRepository::class);
+        $seedCoverageRepository->expects($this->once())->method('save')->with(1, $result);
+
+        $tester = new CommandTester($this->command($historySeeder, $storeManager, $seedCoverageRepository));
         $tester->execute([]);
 
         $this->assertSame(0, $tester->getStatusCode());
@@ -76,7 +80,7 @@ class CoverageCommandTest extends TestCase
             ),
         ]);
 
-        $tester = new CommandTester(new CoverageCommand($historySeeder, $storeManager));
+        $tester = new CommandTester($this->command($historySeeder, $storeManager));
         $tester->execute([]);
 
         $this->assertSame(0, $tester->getStatusCode());
@@ -94,7 +98,7 @@ class CoverageCommandTest extends TestCase
         $historySeeder = $this->createMock(HistorySeeder::class);
         $historySeeder->expects($this->never())->method('seed');
 
-        $tester = new CommandTester(new CoverageCommand($historySeeder, $storeManager));
+        $tester = new CommandTester($this->command($historySeeder, $storeManager));
         $tester->execute([]);
 
         $this->assertSame(1, $tester->getStatusCode());
@@ -124,7 +128,7 @@ class CoverageCommandTest extends TestCase
             ),
         ]);
 
-        $tester = new CommandTester(new CoverageCommand($historySeeder, $storeManager));
+        $tester = new CommandTester($this->command($historySeeder, $storeManager));
         $tester->execute([]);
 
         $display = $tester->getDisplay();
@@ -134,6 +138,19 @@ class CoverageCommandTest extends TestCase
         $this->assertStringContainsString(
             'customer account history warming up: 10 of 84 days available so far',
             $display
+        );
+    }
+
+    private function command(
+        HistorySeeder $historySeeder,
+        StoreManagerInterface $storeManager,
+        ?SeedCoverageRepository $seedCoverageRepository = null
+    ): CoverageCommand {
+        return new CoverageCommand(
+            $historySeeder,
+            $storeManager,
+            $seedCoverageRepository ?? $this->createStub(SeedCoverageRepository::class),
+            new SeedCoverageLabel()
         );
     }
 }

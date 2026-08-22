@@ -10,6 +10,7 @@ namespace Watchtower\Connector\Model\Diagnostics;
 
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\Seed\SeedCoverageResult;
 
 /**
  * One tracked signal's last-known status and sequence number, for diagnostics.
@@ -29,6 +30,9 @@ class SignalSnapshot
      * @param string[] $ensembleDrivingChecks which named checks (dispersion, seasonal, trend)
      *     drove the most recent raw classification; always empty for cron_health/integration_health
      *     (no ensemble) and for a rate-based signal on the inter-arrival (low-volume) path instead
+     * @param SeedCoverageResult|null $seedCoverage the last persisted local-baseline seeding outcome for
+     *     this signal, or null if it has never been seeded (cron_health/integration_health included,
+     *     since neither is a HistorySeeder category)
      */
     public function __construct(
         public readonly string $category,
@@ -37,6 +41,7 @@ class SignalSnapshot
         public readonly ?ReportReason $reason = null,
         public readonly ?float $estimatedDetectionLatencyHours = null,
         public readonly array $ensembleDrivingChecks = [],
+        public readonly ?SeedCoverageResult $seedCoverage = null,
     ) {
     }
 }

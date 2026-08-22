@@ -37,6 +37,7 @@ use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\ReportingService;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
+use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
 use Watchtower\Connector\Model\Signal\CustomerAccountRegistrationReader;
@@ -272,6 +273,7 @@ class ReportingCyclePerfTest extends TestCase
             $rollupRepository,
             $dispersionEvaluator ?? $this->stubDispersionEvaluator(),
             $historySeeder ?? $this->createStub(HistorySeeder::class),
+            $this->createStub(SeedCoverageRepository::class),
             $integrationHealthConfigRepository ?? $this->stubIntegrationHealthConfigRepository(),
             $integrationHealthEvaluator,
             $this->createStub(CronJobObserver::class),

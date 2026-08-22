@@ -21,15 +21,18 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepositor
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
+use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 
 /**
  * The read-only data-assembly layer shared by the watchtower:status command
  * and the admin diagnostics page.
  *
- * Everything here must stay read-only: HistorySeeder::seed(), for example,
- * writes rollup rows as a side effect, so seed coverage cannot be reported
- * from a snapshot without re-seeding real data on every page view.
+ * Everything here must stay read-only: HistorySeeder::seed() writes rollup
+ * rows as a side effect, so seed coverage is read back from
+ * SeedCoverageRepository (the last persisted outcome, written by whichever
+ * of CoverageCommand or ReportingService actually triggered seeding) rather
+ * than re-seeding on every page view.
  */
 class DiagnosticsSnapshotProvider
 {
@@ -48,6 +51,8 @@ class DiagnosticsSnapshotProvider
      * @param DispersionStateRepository $dispersionStateRepository
      * @param DispersionEvaluator $dispersionEvaluator read-only detection-latency estimate only --
      *     never invoke evaluate() from here, it mutates confirmed/pending state as a side effect
+     * @param SeedCoverageRepository $seedCoverageRepository read-only lookup of the last persisted
+     *     seed outcome -- never invoke HistorySeeder::seed() from here, it writes rollup rows
      * @param IntegrationHealthStateRepository $integrationHealthStateRepository
      * @param IntegrationHealthConfigRepository $integrationHealthConfigRepository
      * @param LiveStoreViewResolver $liveStoreViewResolver
@@ -63,6 +68,7 @@ class DiagnosticsSnapshotProvider
         private readonly HealthStateRepository $healthStateRepository,
         private readonly DispersionStateRepository $dispersionStateRepository,
         private readonly DispersionEvaluator $dispersionEvaluator,
+        private readonly SeedCoverageRepository $seedCoverageRepository,
         private readonly IntegrationHealthStateRepository $integrationHealthStateRepository,
         private readonly IntegrationHealthConfigRepository $integrationHealthConfigRepository,
         private readonly LiveStoreViewResolver $liveStoreViewResolver,
@@ -169,6 +175,7 @@ class DiagnosticsSnapshotProvider
                         $evaluatedHour
                     ),
                     ensembleDrivingChecks: $state->ensembleDrivingChecks,
+                    seedCoverage: $this->seedCoverageRepository->get($storeViewId, $category),
                 );
             }
 

@@ -14,6 +14,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
+use Watchtower\Connector\Model\Seed\SeedCoverageLabel;
 
 /**
  * The admin diagnostics page, headlessly. Deliberately continues past an
@@ -30,11 +31,13 @@ class StatusCommand extends Command
     /**
      * @param Config $config
      * @param DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider
+     * @param SeedCoverageLabel $seedCoverageLabel
      * @param string|null $name
      */
     public function __construct(
         private readonly Config $config,
         private readonly DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider,
+        private readonly SeedCoverageLabel $seedCoverageLabel,
         ?string $name = null
     ) {
         parent::__construct($name);
@@ -161,6 +164,10 @@ class StatusCommand extends Command
                     $latency,
                     $attribution
                 ));
+
+                if ($signal->seedCoverage !== null) {
+                    $output->writeln('    '.$this->seedCoverageLabel->describe($signal->seedCoverage));
+                }
             }
         }
     }

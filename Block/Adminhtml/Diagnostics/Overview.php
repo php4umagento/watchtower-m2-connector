@@ -16,6 +16,7 @@ use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
 use Watchtower\Connector\Model\Diagnostics\SignalSnapshot;
 use Watchtower\Connector\Model\Diagnostics\StoreViewSnapshot;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
+use Watchtower\Connector\Model\Seed\SeedCoverageLabel;
 
 /**
  * Backs the diagnostics page -- a thin read-only wrapper around
@@ -34,11 +35,13 @@ class Overview extends Template
     /**
      * @param Context $context
      * @param DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider
+     * @param SeedCoverageLabel $seedCoverageLabel
      * @param array $data
      */
     public function __construct(
         Context $context,
         private readonly DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider,
+        private readonly SeedCoverageLabel $seedCoverageLabel,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -125,6 +128,24 @@ class Overview extends Template
         }
 
         return sprintf('~%dh (low-volume mode)', (int) ceil($signal->estimatedDetectionLatencyHours));
+    }
+
+    /**
+     * A signal's local baseline seed coverage in merchant-facing wording
+     * (e.g. "cart history seeded: 26 days"), or an empty string when this
+     * signal has never been seeded -- not a HistorySeeder category
+     * (cron_health/integration_health) or seeding simply hasn't run yet.
+     *
+     * @param SignalSnapshot $signal
+     * @return string
+     */
+    public function seedCoverageLabel(SignalSnapshot $signal): string
+    {
+        if ($signal->seedCoverage === null) {
+            return '';
+        }
+
+        return $this->seedCoverageLabel->describe($signal->seedCoverage);
     }
 
     /**

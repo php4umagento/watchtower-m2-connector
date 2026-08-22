@@ -28,6 +28,7 @@ use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
+use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
 use Watchtower\Connector\Model\Seed\SeedCoverageResult;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
@@ -74,6 +75,8 @@ class ReportingService
      * @param RollupRepository $rollupRepository
      * @param DispersionEvaluator $dispersionEvaluator
      * @param HistorySeeder $historySeeder
+     * @param SeedCoverageRepository $seedCoverageRepository persists seedIfNeverSeeded()'s outcome so the
+     *     diagnostics page/CLI can read it back without re-seeding
      * @param IntegrationHealthConfigRepository $integrationHealthConfigRepository
      * @param IntegrationHealthEvaluator $integrationHealthEvaluator
      * @param CronJobObserver $cronJobObserver
@@ -97,6 +100,7 @@ class ReportingService
         private readonly RollupRepository $rollupRepository,
         private readonly DispersionEvaluator $dispersionEvaluator,
         private readonly HistorySeeder $historySeeder,
+        private readonly SeedCoverageRepository $seedCoverageRepository,
         private readonly IntegrationHealthConfigRepository $integrationHealthConfigRepository,
         private readonly IntegrationHealthEvaluator $integrationHealthEvaluator,
         private readonly CronJobObserver $cronJobObserver,
@@ -390,6 +394,10 @@ class ReportingService
         }
 
         $results = $this->historySeeder->seed($storeViewId, $now, $this->historySeeder->defaultBaselineWindowDays());
+
+        foreach ($results as $result) {
+            $this->seedCoverageRepository->save($storeViewId, $result);
+        }
 
         $this->logger->info('Watchtower seeded historical baseline for a newly-tracked store view.', [
             'storeViewId' => $storeViewId,
