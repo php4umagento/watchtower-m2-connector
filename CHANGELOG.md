@@ -5,6 +5,13 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.11.0] - 2026-08-22
+
+Fixes a false "back to normal" email on a brand-new install or store view:
+`CronHealth`, `IntegrationHealth`, and `RateSignal\DispersionEvaluator` now
+report `NORMAL` confirmed straight out of the `INSUFFICIENT_DATA` seed as a
+heartbeat instead of a transition, since nothing was ever actually down.
+
 ## [1.10.1] - 2026-08-21
 
 Condenses this changelog's entries. No functional change.
