@@ -72,7 +72,8 @@ class Evaluator
                 $lastFailureAt,
                 null,
                 SignalStatus::InsufficientData,
-                $state->sequenceNumber + 1
+                $state->sequenceNumber + 1,
+                ReportReason::Transition
             );
 
             return $this->report(
@@ -92,7 +93,8 @@ class Evaluator
                 $lastFailureAt,
                 null,
                 $state->confirmedStatus,
-                $state->sequenceNumber + 1
+                $state->sequenceNumber + 1,
+                ReportReason::Heartbeat
             );
 
             return $this->report(
@@ -108,8 +110,6 @@ class Evaluator
         // Requiring the two ticks to match each other would let a status alternating
         // between two non-confirmed values never converge.
         if ($state->pendingStatus !== null) {
-            $this->save($storeViewId, $lastSuccessAt, $lastFailureAt, null, $rawStatus, $state->sequenceNumber + 1);
-
             // Same "warm-up finishing is not a recovery" reasoning as
             // CronHealth\Evaluator -- confirming NORMAL straight out of the
             // INSUFFICIENT_DATA seed on a fresh store view must not report as a
@@ -121,6 +121,16 @@ class Evaluator
                 ? ReportReason::Heartbeat
                 : ReportReason::Transition;
 
+            $this->save(
+                $storeViewId,
+                $lastSuccessAt,
+                $lastFailureAt,
+                null,
+                $rawStatus,
+                $state->sequenceNumber + 1,
+                $reason
+            );
+
             return $this->report($storeViewCode, $rawStatus, $state->sequenceNumber, $now, $reason);
         }
 
@@ -131,7 +141,8 @@ class Evaluator
             $lastFailureAt,
             $rawStatus,
             $state->confirmedStatus,
-            $state->sequenceNumber + 1
+            $state->sequenceNumber + 1,
+            ReportReason::Heartbeat
         );
 
         return $this->report(
@@ -173,7 +184,8 @@ class Evaluator
             $state->lastFailureAt,
             null,
             $state->confirmedStatus,
-            $state->sequenceNumber + 1
+            $state->sequenceNumber + 1,
+            ReportReason::Heartbeat
         );
 
         return $this->report(
@@ -224,6 +236,7 @@ class Evaluator
      * @param SignalStatus|null $pendingStatus
      * @param SignalStatus|null $confirmedStatus
      * @param int $sequenceNumber
+     * @param ReportReason $reason the reason for the report this tick actually produces
      * @return void
      */
     private function save(
@@ -233,6 +246,7 @@ class Evaluator
         ?SignalStatus $pendingStatus,
         ?SignalStatus $confirmedStatus,
         int $sequenceNumber,
+        ReportReason $reason,
     ): void {
         $this->repository->save(new IntegrationHealthState(
             storeViewId: $storeViewId,
@@ -241,6 +255,7 @@ class Evaluator
             pendingStatus: $pendingStatus,
             confirmedStatus: $confirmedStatus,
             sequenceNumber: $sequenceNumber,
+            lastReportedReason: $reason,
         ));
     }
 

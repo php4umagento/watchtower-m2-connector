@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Model\Diagnostics;
 
+use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 
 /**
@@ -19,6 +20,8 @@ class SignalSnapshot
      * @param string $category cron_health, basket_quote, checkout, customer_account, or integration_health
      * @param SignalStatus|null $status null means no evaluation has ever run for this signal
      * @param int $sequenceNumber
+     * @param ReportReason|null $reason why the last report was sent (heartbeat or transition);
+     *     null means no evaluation has ever run for this signal
      * @param float|null $estimatedDetectionLatencyHours set only for a rate-based
      *     signal currently in Low-Volume Signal Mode with enough history to estimate one --
      *     null for cron_health/integration_health (not rate-based) and for a signal that
@@ -28,6 +31,7 @@ class SignalSnapshot
         public readonly string $category,
         public readonly ?SignalStatus $status,
         public readonly int $sequenceNumber,
+        public readonly ?ReportReason $reason = null,
         public readonly ?float $estimatedDetectionLatencyHours = null,
     ) {
     }

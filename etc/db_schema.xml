@@ -22,6 +22,8 @@
                 comment="Raw status awaiting a second consecutive confirmation"/>
         <column xsi:type="varchar" name="confirmed_status" nullable="true" length="20"
                 comment="Last confirmed, reported status"/>
+        <column xsi:type="varchar" name="last_reported_reason" nullable="true" length="20"
+                comment="Reason for the last reported status: heartbeat or transition"/>
         <column xsi:type="int" name="sequence_number" unsigned="true" nullable="false" default="1"
                 comment="Next sequence number for this event type"/>
         <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
@@ -170,6 +172,8 @@
                 comment="Raw status awaiting a second consecutive confirmation"/>
         <column xsi:type="varchar" name="confirmed_status" nullable="true" length="20"
                 comment="Last confirmed, reported status"/>
+        <column xsi:type="varchar" name="last_reported_reason" nullable="true" length="20"
+                comment="Reason for the last reported status: heartbeat or transition"/>
         <column xsi:type="int" name="sequence_number" unsigned="true" nullable="false" default="1"
                 comment="Next sequence number for this store view and category"/>
         <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
@@ -244,6 +248,8 @@
                 comment="Raw status awaiting a second consecutive confirmation"/>
         <column xsi:type="varchar" name="confirmed_status" nullable="true" length="20"
                 comment="Last confirmed, reported status"/>
+        <column xsi:type="varchar" name="last_reported_reason" nullable="true" length="20"
+                comment="Reason for the last reported status: heartbeat or transition"/>
         <column xsi:type="int" name="sequence_number" unsigned="true" nullable="false" default="1"
                 comment="Next sequence number for this store view"/>
         <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"

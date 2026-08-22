@@ -71,7 +71,8 @@ class Evaluator
                 $lastFailureAt,
                 null,
                 SignalStatus::InsufficientData,
-                $state->sequenceNumber + 1
+                $state->sequenceNumber + 1,
+                ReportReason::Transition
             );
 
             return $this->report(
@@ -84,7 +85,14 @@ class Evaluator
 
         if ($rawStatus === $state->confirmedStatus) {
             // No change; clear any stale pending status from a raw blip that never confirmed.
-            $this->save($lastSuccessAt, $lastFailureAt, null, $state->confirmedStatus, $state->sequenceNumber + 1);
+            $this->save(
+                $lastSuccessAt,
+                $lastFailureAt,
+                null,
+                $state->confirmedStatus,
+                $state->sequenceNumber + 1,
+                ReportReason::Heartbeat
+            );
 
             return $this->report($state->confirmedStatus, $state->sequenceNumber, $now, ReportReason::Heartbeat);
         }
@@ -93,8 +101,6 @@ class Evaluator
         // even if it differs from the pending one. Requiring the two to match would
         // let an alternating status (MILD_DROP, SEVERE_DROP, ...) never converge.
         if ($state->pendingStatus !== null) {
-            $this->save($lastSuccessAt, $lastFailureAt, null, $rawStatus, $state->sequenceNumber + 1);
-
             // Confirming NORMAL straight out of the INSUFFICIENT_DATA seed (see
             // isFirstEvaluation() above) is warm-up finishing on a fresh install,
             // not a recovery -- cron was never actually down. Reporting it as a
@@ -108,11 +114,20 @@ class Evaluator
                 ? ReportReason::Heartbeat
                 : ReportReason::Transition;
 
+            $this->save($lastSuccessAt, $lastFailureAt, null, $rawStatus, $state->sequenceNumber + 1, $reason);
+
             return $this->report($rawStatus, $state->sequenceNumber, $now, $reason);
         }
 
         // First differing tick: start the confirmation counter; still report the old confirmed value.
-        $this->save($lastSuccessAt, $lastFailureAt, $rawStatus, $state->confirmedStatus, $state->sequenceNumber + 1);
+        $this->save(
+            $lastSuccessAt,
+            $lastFailureAt,
+            $rawStatus,
+            $state->confirmedStatus,
+            $state->sequenceNumber + 1,
+            ReportReason::Heartbeat
+        );
 
         return $this->report($state->confirmedStatus, $state->sequenceNumber, $now, ReportReason::Heartbeat);
     }
@@ -153,6 +168,7 @@ class Evaluator
      * @param SignalStatus|null $pendingStatus
      * @param SignalStatus|null $confirmedStatus
      * @param int $sequenceNumber
+     * @param ReportReason $reason the reason for the report this tick actually produces
      * @return void
      */
     private function save(
@@ -161,6 +177,7 @@ class Evaluator
         ?SignalStatus $pendingStatus,
         ?SignalStatus $confirmedStatus,
         int $sequenceNumber,
+        ReportReason $reason,
     ): void {
         $this->repository->save(new HealthState(
             eventType: self::EVENT_TYPE,
@@ -169,6 +186,7 @@ class Evaluator
             pendingStatus: $pendingStatus,
             confirmedStatus: $confirmedStatus,
             sequenceNumber: $sequenceNumber,
+            lastReportedReason: $reason,
         ));
     }
 

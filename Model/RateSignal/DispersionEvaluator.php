@@ -204,7 +204,14 @@ class DispersionEvaluator
 
         // First evaluation for this pair: nothing to debounce against yet.
         if ($state->isFirstEvaluation()) {
-            $this->save($storeViewId, $category, null, SignalStatus::InsufficientData, $state->sequenceNumber + 1);
+            $this->save(
+                $storeViewId,
+                $category,
+                null,
+                SignalStatus::InsufficientData,
+                $state->sequenceNumber + 1,
+                ReportReason::Transition
+            );
 
             return $this->report(
                 $storeViewCode,
@@ -218,7 +225,14 @@ class DispersionEvaluator
 
         if ($rawStatus === $state->confirmedStatus) {
             // No change; clear any stale pending status from a raw blip that never confirmed.
-            $this->save($storeViewId, $category, null, $state->confirmedStatus, $state->sequenceNumber + 1);
+            $this->save(
+                $storeViewId,
+                $category,
+                null,
+                $state->confirmedStatus,
+                $state->sequenceNumber + 1,
+                ReportReason::Heartbeat
+            );
 
             return $this->report(
                 $storeViewCode,
@@ -231,9 +245,6 @@ class DispersionEvaluator
         }
 
         if ($state->pendingStatus !== null) {
-            // Second consecutive differing tick: confirm using the current raw status.
-            $this->save($storeViewId, $category, null, $rawStatus, $state->sequenceNumber + 1);
-
             // Same "warm-up finishing is not a recovery" reasoning as
             // CronHealth\Evaluator and IntegrationHealth\Evaluator --
             // confirming NORMAL straight out of the INSUFFICIENT_DATA seed
@@ -247,6 +258,9 @@ class DispersionEvaluator
                 ? ReportReason::Heartbeat
                 : ReportReason::Transition;
 
+            // Second consecutive differing tick: confirm using the current raw status.
+            $this->save($storeViewId, $category, null, $rawStatus, $state->sequenceNumber + 1, $reason);
+
             return $this->report(
                 $storeViewCode,
                 $category,
@@ -258,7 +272,14 @@ class DispersionEvaluator
         }
 
         // First differing tick: start the confirmation counter; still report the old confirmed value.
-        $this->save($storeViewId, $category, $rawStatus, $state->confirmedStatus, $state->sequenceNumber + 1);
+        $this->save(
+            $storeViewId,
+            $category,
+            $rawStatus,
+            $state->confirmedStatus,
+            $state->sequenceNumber + 1,
+            ReportReason::Heartbeat
+        );
 
         return $this->report(
             $storeViewCode,
@@ -717,6 +738,7 @@ class DispersionEvaluator
      * @param SignalStatus|null $pendingStatus
      * @param SignalStatus|null $confirmedStatus
      * @param int $sequenceNumber
+     * @param ReportReason $reason the reason for the report this tick actually produces
      * @return void
      */
     private function save(
@@ -725,6 +747,7 @@ class DispersionEvaluator
         ?SignalStatus $pendingStatus,
         ?SignalStatus $confirmedStatus,
         int $sequenceNumber,
+        ReportReason $reason,
     ): void {
         $this->repository->save(new DispersionState(
             storeViewId: $storeViewId,
@@ -732,6 +755,7 @@ class DispersionEvaluator
             pendingStatus: $pendingStatus,
             confirmedStatus: $confirmedStatus,
             sequenceNumber: $sequenceNumber,
+            lastReportedReason: $reason,
         ));
     }
 

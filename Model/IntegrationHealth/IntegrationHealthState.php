@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Model\IntegrationHealth;
 
+use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 
 /**
@@ -26,6 +27,7 @@ class IntegrationHealthState
      * @param SignalStatus|null $pendingStatus
      * @param SignalStatus|null $confirmedStatus
      * @param int $sequenceNumber
+     * @param ReportReason|null $lastReportedReason null only when no evaluation has ever run
      */
     public function __construct(
         public readonly int $storeViewId,
@@ -34,6 +36,7 @@ class IntegrationHealthState
         public readonly ?SignalStatus $pendingStatus,
         public readonly ?SignalStatus $confirmedStatus,
         public readonly int $sequenceNumber,
+        public readonly ?ReportReason $lastReportedReason = null,
     ) {
     }
 

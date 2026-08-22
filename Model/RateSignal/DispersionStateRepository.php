@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace Watchtower\Connector\Model\RateSignal;
 
 use Magento\Framework\App\ResourceConnection;
+use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 
 /**
@@ -64,6 +65,7 @@ class DispersionStateRepository
             pendingStatus: SignalStatus::tryFrom((string) $row['pending_status']),
             confirmedStatus: SignalStatus::tryFrom((string) $row['confirmed_status']),
             sequenceNumber: (int) $row['sequence_number'],
+            lastReportedReason: ReportReason::tryFrom((string) ($row['last_reported_reason'] ?? '')),
         );
     }
 
@@ -85,9 +87,10 @@ class DispersionStateRepository
                 'category' => $state->category,
                 'pending_status' => $state->pendingStatus?->value,
                 'confirmed_status' => $state->confirmedStatus?->value,
+                'last_reported_reason' => $state->lastReportedReason?->value,
                 'sequence_number' => $state->sequenceNumber,
             ],
-            ['pending_status', 'confirmed_status', 'sequence_number']
+            ['pending_status', 'confirmed_status', 'last_reported_reason', 'sequence_number']
         );
     }
 }

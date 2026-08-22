@@ -131,9 +131,10 @@ class StatusCommand extends Command
     private function printSignalStatus(OutputInterface $output, DiagnosticsSnapshot $snapshot): void
     {
         $output->writeln(sprintf(
-            'cron_health: %s (sequence %d)',
+            'cron_health: %s (sequence %d, reason: %s)',
             $snapshot->cronHealth->status?->value ?? 'no data yet',
-            $snapshot->cronHealth->sequenceNumber
+            $snapshot->cronHealth->sequenceNumber,
+            $snapshot->cronHealth->reason?->value ?? 'no data yet'
         ));
 
         foreach ($snapshot->storeViews as $storeView) {
@@ -148,10 +149,11 @@ class StatusCommand extends Command
                     : '';
 
                 $output->writeln(sprintf(
-                    '  %s: %s (sequence %d)%s',
+                    '  %s: %s (sequence %d, reason: %s)%s',
                     $signal->category,
                     $signal->status?->value ?? 'no data yet',
                     $signal->sequenceNumber,
+                    $signal->reason?->value ?? 'no data yet',
                     $latency
                 ));
             }

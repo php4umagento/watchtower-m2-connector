@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace Watchtower\Connector\Model\IntegrationHealth;
 
 use Magento\Framework\App\ResourceConnection;
+use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 
 /**
@@ -61,6 +62,7 @@ class IntegrationHealthStateRepository
             pendingStatus: SignalStatus::tryFrom((string) $row['pending_status']),
             confirmedStatus: SignalStatus::tryFrom((string) $row['confirmed_status']),
             sequenceNumber: (int) $row['sequence_number'],
+            lastReportedReason: ReportReason::tryFrom((string) ($row['last_reported_reason'] ?? '')),
         );
     }
 
@@ -83,9 +85,17 @@ class IntegrationHealthStateRepository
                 'last_failure_at' => $state->lastFailureAt?->format('Y-m-d H:i:s'),
                 'pending_status' => $state->pendingStatus?->value,
                 'confirmed_status' => $state->confirmedStatus?->value,
+                'last_reported_reason' => $state->lastReportedReason?->value,
                 'sequence_number' => $state->sequenceNumber,
             ],
-            ['last_success_at', 'last_failure_at', 'pending_status', 'confirmed_status', 'sequence_number']
+            [
+                'last_success_at',
+                'last_failure_at',
+                'pending_status',
+                'confirmed_status',
+                'last_reported_reason',
+                'sequence_number',
+            ]
         );
     }
 
