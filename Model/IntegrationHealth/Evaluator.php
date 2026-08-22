@@ -110,7 +110,18 @@ class Evaluator
         if ($state->pendingStatus !== null) {
             $this->save($storeViewId, $lastSuccessAt, $lastFailureAt, null, $rawStatus, $state->sequenceNumber + 1);
 
-            return $this->report($storeViewCode, $rawStatus, $state->sequenceNumber, $now, ReportReason::Transition);
+            // Same "warm-up finishing is not a recovery" reasoning as
+            // CronHealth\Evaluator -- confirming NORMAL straight out of the
+            // INSUFFICIENT_DATA seed on a fresh store view must not report as a
+            // transition, or the platform sends a "back to normal" email for an
+            // install that was never actually down. An anomalous status
+            // confirmed out of the seed is still a genuine first-detected
+            // problem and keeps alerting.
+            $reason = $state->confirmedStatus === SignalStatus::InsufficientData && $rawStatus === SignalStatus::Normal
+                ? ReportReason::Heartbeat
+                : ReportReason::Transition;
+
+            return $this->report($storeViewCode, $rawStatus, $state->sequenceNumber, $now, $reason);
         }
 
         // First differing tick: start the confirmation counter; still report the old confirmed value.
