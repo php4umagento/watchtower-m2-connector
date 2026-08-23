@@ -5,6 +5,25 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.21.0] - 2026-08-23
+
+Adds `admin_auth_failure`, a new signal counting failed Magento admin
+sign-ins per hour, install-wide. A burst of these usually means someone is
+guessing passwords rather than an administrator mistyping one. Like
+`cron_health` it is install-scoped, and it never transmits or stores the
+attempted username or the exception, only a count.
+
+`checkout_failure` now tightens its thresholds toward each store's own
+demonstrated normal once the store has enough history, so a clean store
+catches a degradation the conservative default would sleep through. This
+never delays first-hour detection: with no history the fixed defaults
+apply unchanged.
+
+Also consolidates the two-evaluation debounce every signal shares into one
+class, replacing three near-identical copies. No behavioural change.
+
+Run `setup:upgrade`, it adds one table for the new signal's counter.
+
 ## [1.20.0] - 2026-08-23
 
 Adds `checkout_failure`, a new signal reporting the share of order
