@@ -34,6 +34,7 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigReposito
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
+use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\ReportingService;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
@@ -273,6 +274,7 @@ class ReportingCyclePerfTest extends TestCase
             $customerAccountReader ?? $this->stubCustomerAccountReader(),
             $rollupRepository,
             $dispersionEvaluator ?? $this->stubDispersionEvaluator(),
+            $this->createStub(CheckoutFailureEvaluator::class),
             $historySeeder ?? $this->createStub(HistorySeeder::class),
             $this->createStub(SeedCoverageRepository::class),
             $integrationHealthConfigRepository ?? $this->stubIntegrationHealthConfigRepository(),

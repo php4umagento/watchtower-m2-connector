@@ -14,6 +14,7 @@ use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
 use Watchtower\Connector\Model\Api\MetricsSubmissionService;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
+use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
 use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
@@ -75,6 +76,7 @@ class ReportingService
      * @param CustomerAccountReader $customerAccountReader
      * @param RollupRepository $rollupRepository
      * @param DispersionEvaluator $dispersionEvaluator
+     * @param CheckoutFailureEvaluator $checkoutFailureEvaluator
      * @param HistorySeeder $historySeeder
      * @param SeedCoverageRepository $seedCoverageRepository persists seedIfNeverSeeded()'s outcome so the
      *     diagnostics page/CLI can read it back without re-seeding
@@ -102,6 +104,7 @@ class ReportingService
         private readonly CustomerAccountReader $customerAccountReader,
         private readonly RollupRepository $rollupRepository,
         private readonly DispersionEvaluator $dispersionEvaluator,
+        private readonly CheckoutFailureEvaluator $checkoutFailureEvaluator,
         private readonly HistorySeeder $historySeeder,
         private readonly SeedCoverageRepository $seedCoverageRepository,
         private readonly IntegrationHealthConfigRepository $integrationHealthConfigRepository,
@@ -407,8 +410,15 @@ class ReportingService
              * @var string $category
              * @var RateSignalReaderInterface $reader
              */
+            $checkoutCount = 0;
+
             foreach ($readersByCategory as $category => $reader) {
                 $observedCount = $reader->countForWindow($storeViewId, $windowStart, $windowEnd);
+
+                if ($category === HistorySeeder::CATEGORY_CHECKOUT) {
+                    $checkoutCount = $observedCount;
+                }
+
                 $this->rollupRepository->recordHourlyCount(
                     $storeViewId,
                     $category,
@@ -424,6 +434,21 @@ class ReportingService
                     $now
                 );
             }
+
+            // Reuses the checkout count just read rather than querying
+            // sales_order again: the ratio's denominator must be the SAME
+            // hour's successes as its numerator's failures, and a second read
+            // could straddle a late-arriving row and disagree with the first.
+            // No rollup row is written for this category -- it has no baseline
+            // to accumulate, and a stored ratio would only invite someone to
+            // build one.
+            $reports[] = $this->checkoutFailureEvaluator->evaluate(
+                $storeViewId,
+                $storeViewCode,
+                $checkoutCount,
+                $evaluatedHourStart,
+                $now
+            );
 
             $integrationHealthReport = $this->integrationHealthReportFor($storeViewId, $storeViewCode, $now);
 

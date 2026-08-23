@@ -36,6 +36,7 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepositor
 use Watchtower\Connector\Model\IntegrationHealth\Observation;
 use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
+use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\ReportingService;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
@@ -703,6 +704,7 @@ class ReportingServiceTest extends TestCase
         $basketQuoteStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_BASKET_QUOTE, 'default');
         $checkoutStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_CHECKOUT, 'default');
         $customerAccountStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT, 'default');
+        $checkoutFailureStoreReport = $this->storeViewReport('checkout_failure', 'default');
 
         $evaluator = $this->createStub(Evaluator::class);
         $evaluator->method('evaluate')->willReturn($cronHealthReport);
@@ -771,6 +773,7 @@ class ReportingServiceTest extends TestCase
             checkoutReader: $checkoutReader,
             customerAccountReader: $customerAccountReader,
             dispersionEvaluator: $dispersionEvaluator,
+            checkoutFailureEvaluator: $this->checkoutFailureEvaluatorReturning($checkoutFailureStoreReport),
         )->run();
 
         self::assertCount(500, $capturedBatches[0]);
@@ -778,7 +781,11 @@ class ReportingServiceTest extends TestCase
         self::assertTrue(in_array($basketQuoteStoreReport, $capturedBatches[0], true));
         self::assertFalse(in_array($checkoutStoreReport, $capturedBatches[0], true));
         self::assertFalse(in_array($customerAccountStoreReport, $capturedBatches[0], true));
-        self::assertSame([$checkoutStoreReport, $customerAccountStoreReport], $capturedBatches[1]);
+        self::assertFalse(in_array($checkoutFailureStoreReport, $capturedBatches[0], true));
+        self::assertSame(
+            [$checkoutStoreReport, $customerAccountStoreReport, $checkoutFailureStoreReport],
+            $capturedBatches[1]
+        );
     }
 
     /**
@@ -913,6 +920,7 @@ class ReportingServiceTest extends TestCase
         $basketQuoteStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_BASKET_QUOTE, 'default');
         $checkoutStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_CHECKOUT, 'default');
         $customerAccountStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT, 'default');
+        $checkoutFailureStoreReport = $this->storeViewReport('checkout_failure', 'default');
 
         // A callback (not willReturnMap) since the exact \DateTimeImmutable
         // instance passed as $evaluatedAt (real wall-clock time) can't be
@@ -963,7 +971,13 @@ class ReportingServiceTest extends TestCase
             ->with(
                 'https://watchtower.test',
                 'secret-api-key-value',
-                [$cronHealthReport, $basketQuoteStoreReport, $checkoutStoreReport, $customerAccountStoreReport]
+                [
+                    $cronHealthReport,
+                    $basketQuoteStoreReport,
+                    $checkoutStoreReport,
+                    $customerAccountStoreReport,
+                    $checkoutFailureStoreReport,
+                ]
             )
             ->willReturn($result);
 
@@ -978,11 +992,17 @@ class ReportingServiceTest extends TestCase
             customerAccountReader: $customerAccountReader,
             rollupRepository: $rollupRepository,
             dispersionEvaluator: $dispersionEvaluator,
+            checkoutFailureEvaluator: $this->checkoutFailureEvaluatorReturning($checkoutFailureStoreReport),
         )->run();
 
         self::assertSame($cronHealthReport, $outcome['report']);
         self::assertSame(
-            [$basketQuoteStoreReport, $checkoutStoreReport, $customerAccountStoreReport],
+            [
+                $basketQuoteStoreReport,
+                $checkoutStoreReport,
+                $customerAccountStoreReport,
+                $checkoutFailureStoreReport,
+            ],
             $outcome['storeViewReports']
         );
     }
@@ -1127,6 +1147,7 @@ class ReportingServiceTest extends TestCase
         $basketQuoteStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_BASKET_QUOTE, 'default');
         $checkoutStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_CHECKOUT, 'default');
         $customerAccountStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT, 'default');
+        $checkoutFailureStoreReport = $this->storeViewReport('checkout_failure', 'default');
 
         $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
         $dispersionEvaluator->method('evaluate')->willReturnCallback(
@@ -1148,7 +1169,8 @@ class ReportingServiceTest extends TestCase
             ->with(null, self::isInstanceOf(\DateTimeImmutable::class));
 
         $bufferedReports = [];
-        $bufferRepository->expects(self::exactly(4))
+        // cron_health plus four store-view reports: three rate categories and checkout_failure.
+        $bufferRepository->expects(self::exactly(5))
             ->method('bufferReport')
             ->willReturnCallback(function (MetricReport $report) use (&$bufferedReports): int {
                 $bufferedReports[] = $report;
@@ -1171,11 +1193,18 @@ class ReportingServiceTest extends TestCase
             customerAccountReader: $customerAccountReader,
             rollupRepository: $rollupRepository,
             dispersionEvaluator: $dispersionEvaluator,
+            checkoutFailureEvaluator: $this->checkoutFailureEvaluatorReturning($checkoutFailureStoreReport),
         )->run();
 
         self::assertFalse($outcome['result']->succeeded);
         self::assertSame(
-            [$cronHealthReport, $basketQuoteStoreReport, $checkoutStoreReport, $customerAccountStoreReport],
+            [
+                $cronHealthReport,
+                $basketQuoteStoreReport,
+                $checkoutStoreReport,
+                $customerAccountStoreReport,
+                $checkoutFailureStoreReport,
+            ],
             $bufferedReports
         );
     }
@@ -1376,7 +1405,8 @@ class ReportingServiceTest extends TestCase
             integrationHealthEvaluator: $integrationHealthEvaluator,
         )->run();
 
-        self::assertCount(3, $outcome['storeViewReports']);
+        // Three rate categories plus checkout_failure; integration_health absent.
+        self::assertCount(4, $outcome['storeViewReports']);
     }
 
     /**
@@ -1837,6 +1867,7 @@ class ReportingServiceTest extends TestCase
      * @param CustomerAccountReader|null $customerAccountReader
      * @param RollupRepository|null $rollupRepository
      * @param DispersionEvaluator|null $dispersionEvaluator
+     * @param CheckoutFailureEvaluator|null $checkoutFailureEvaluator
      * @param HistorySeeder|null $historySeeder
      * @param SeedCoverageRepository|null $seedCoverageRepository
      * @param IntegrationHealthConfigRepository|null $integrationHealthConfigRepository
@@ -1862,6 +1893,7 @@ class ReportingServiceTest extends TestCase
         ?CustomerAccountReader $customerAccountReader = null,
         ?RollupRepository $rollupRepository = null,
         ?DispersionEvaluator $dispersionEvaluator = null,
+        ?CheckoutFailureEvaluator $checkoutFailureEvaluator = null,
         ?HistorySeeder $historySeeder = null,
         ?SeedCoverageRepository $seedCoverageRepository = null,
         ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
@@ -1927,6 +1959,7 @@ class ReportingServiceTest extends TestCase
             $customerAccountReader ?? $this->createStub(CustomerAccountReader::class),
             $rollupRepository,
             $dispersionEvaluator ?? $this->createStub(DispersionEvaluator::class),
+            $checkoutFailureEvaluator ?? $this->createStub(CheckoutFailureEvaluator::class),
             $historySeeder,
             $seedCoverageRepository,
             $integrationHealthConfigRepository,
@@ -1980,5 +2013,17 @@ class ReportingServiceTest extends TestCase
             reason: ReportReason::Transition,
             rulesetVersion: IntegrationHealthEvaluator::RULESET_VERSION,
         );
+    }
+
+    /**
+     * A CheckoutFailureEvaluator returning one known report per store view, so
+     * the identity assertions above can name it rather than counting past it.
+     */
+    private function checkoutFailureEvaluatorReturning(MetricReport $report): CheckoutFailureEvaluator
+    {
+        $evaluator = $this->createStub(CheckoutFailureEvaluator::class);
+        $evaluator->method('evaluate')->willReturn($report);
+
+        return $evaluator;
     }
 }
