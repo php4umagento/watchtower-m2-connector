@@ -5,6 +5,21 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.19.0] - 2026-08-23
+
+The integration health source picker now lists every cron job the store
+declares, grouped by cron group, rather than only the jobs currently sitting
+in `cron_schedule`. That table is a work queue, not a catalogue, so most
+declared jobs were invisible for most of the day.
+
+Also fixes three cases where `integration_health` reported a status its
+configured source never justified: changing the monitored source carried the
+previous source's evidence and status forward, a newly configured
+long-cadence job reported DOWN before it had a chance to run, and a
+monitored job's success could be missed entirely when its `cron_schedule`
+row was pruned between hourly cycles. Run `setup:upgrade`, it adds three
+columns.
+
 ## [1.18.1] - 2026-08-22
 
 Fixes every outbound API call 401ing with "Missing API key" on Magento
