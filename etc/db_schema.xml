@@ -277,6 +277,12 @@
                 comment="Reason for the last reported status: heartbeat or transition"/>
         <column xsi:type="int" name="sequence_number" unsigned="true" nullable="false" default="1"
                 comment="Next sequence number for this store view"/>
+        <column xsi:type="varchar" name="source_type" nullable="true" length="20"
+                comment="Source type this state describes; a change re-seeds the state machine"/>
+        <column xsi:type="varchar" name="source_identifier" nullable="true" length="255"
+                comment="Source identifier this state describes; a change re-seeds the state machine"/>
+        <column xsi:type="datetime" name="observing_since" nullable="true"
+                comment="When the current source started being observed; grace window for a not-yet-run source"/>
         <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
                 comment="Last evaluated"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">

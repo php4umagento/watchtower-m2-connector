@@ -160,6 +160,9 @@
             "confirmed_status": true,
             "last_reported_reason": true,
             "sequence_number": true,
+            "source_type": true,
+            "source_identifier": true,
+            "observing_since": true,
             "updated_at": true
         },
         "constraint": {

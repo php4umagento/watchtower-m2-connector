@@ -12,6 +12,7 @@ use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfig;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthState;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 
@@ -22,8 +23,9 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepositor
  * same OK/FAILED/DOWN classification), adapted for per-store-view state and
  * a configurable (not hardcoded) expected-max-interval, and for
  * $observedSuccessAt/$observedFailureAt being passed directly rather than
- * resolved via an internal Observer -- this class is source-agnostic; see
- * Model/ReportingService.php for which observer feeds it per store view.
+ * resolved via an internal Observer; see Model/ReportingService.php for which
+ * observer feeds it per store view. Also covers the source-change re-seed and
+ * the newly-configured-source grace window, neither of which cron_health has.
  */
 class EvaluatorTest extends TestCase
 {
@@ -31,8 +33,15 @@ class EvaluatorTest extends TestCase
     private const STORE_VIEW_ID = 7;
     private const STORE_VIEW_CODE = 'default';
     private const EXPECTED_MAX_INTERVAL_MINUTES = 30;
+    private const SOURCE_TYPE = IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB;
+    private const SOURCE_IDENTIFIER = 'watchtower_example_cron';
 
-    public function testFirstEvaluationEverReportsInsufficientDataAsATransition(): void
+    /**
+     * Configuring a source for the first time is a source change like any
+     * other: it seeds INSUFFICIENT_DATA as a heartbeat, never a transition,
+     * which the platform would alert on.
+     */
+    public function testFirstEvaluationEverSeedsInsufficientDataAsAHeartbeat(): void
     {
         $savedState = null;
         $repository = $this->createMock(IntegrationHealthStateRepository::class);
@@ -42,6 +51,8 @@ class EvaluatorTest extends TestCase
         $report = (new Evaluator($repository))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -49,7 +60,7 @@ class EvaluatorTest extends TestCase
         );
 
         self::assertSame(SignalStatus::InsufficientData, $report->status);
-        self::assertSame(ReportReason::Transition, $report->reason);
+        self::assertSame(ReportReason::Heartbeat, $report->reason);
         self::assertSame(1, $report->sequenceNumber);
         self::assertSame(
             self::STORE_VIEW_CODE,
@@ -61,6 +72,9 @@ class EvaluatorTest extends TestCase
         self::assertSame(SignalStatus::InsufficientData, $savedState->confirmedStatus);
         self::assertNull($savedState->pendingStatus);
         self::assertSame(2, $savedState->sequenceNumber);
+        self::assertSame(self::SOURCE_TYPE, $savedState->sourceType);
+        self::assertSame(self::SOURCE_IDENTIFIER, $savedState->sourceIdentifier);
+        self::assertEquals($this->now(), $savedState->observingSince);
     }
 
     public function testUnchangedStatusIsReportedAsAHeartbeatAndSequenceStillAdvances(): void
@@ -75,6 +89,8 @@ class EvaluatorTest extends TestCase
         $report = (new Evaluator($repository))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -107,6 +123,8 @@ class EvaluatorTest extends TestCase
         $report = (new Evaluator($repository))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             null,
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -134,6 +152,8 @@ class EvaluatorTest extends TestCase
         $report = (new Evaluator($repository))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             null,
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -151,7 +171,7 @@ class EvaluatorTest extends TestCase
 
     /**
      * Regression test for a real bug: a fresh store view's integration_health
-     * warms up through INSUFFICIENT_DATA (the isFirstEvaluation() seed)
+     * warms up through INSUFFICIENT_DATA (the source-change seed)
      * before its first real confirmed status. Confirming NORMAL straight out
      * of that seed must NOT report as a transition -- it was never actually
      * down, so this is warm-up finishing, not a recovery. Reporting it as a
@@ -175,6 +195,8 @@ class EvaluatorTest extends TestCase
         $report = (new Evaluator($repository))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -209,6 +231,8 @@ class EvaluatorTest extends TestCase
         $report = (new Evaluator($repository))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             null,
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -230,6 +254,8 @@ class EvaluatorTest extends TestCase
         $tick1 = (new Evaluator($repo1))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             null,
             $this->now(),
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -249,6 +275,8 @@ class EvaluatorTest extends TestCase
         $tick2 = (new Evaluator($repo2))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             null,
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -288,6 +316,8 @@ class EvaluatorTest extends TestCase
         $report = (new Evaluator($repository))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -325,6 +355,8 @@ class EvaluatorTest extends TestCase
         $tick1 = (new Evaluator($repo1))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -352,6 +384,8 @@ class EvaluatorTest extends TestCase
         $tick2 = (new Evaluator($repo2))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -376,6 +410,8 @@ class EvaluatorTest extends TestCase
         $report = (new Evaluator($repository))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             null,
             $this->now(),
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -402,6 +438,10 @@ class EvaluatorTest extends TestCase
             pendingStatus: null,
             confirmedStatus: SignalStatus::Normal,
             sequenceNumber: 8,
+            lastReportedReason: null,
+            sourceType: self::SOURCE_TYPE,
+            sourceIdentifier: self::SOURCE_IDENTIFIER,
+            observingSince: $this->now()->modify('-1 year'),
         );
 
         $savedState = null;
@@ -415,6 +455,8 @@ class EvaluatorTest extends TestCase
         $report = (new Evaluator($repository))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             null,
             null,
             self::EXPECTED_MAX_INTERVAL_MINUTES,
@@ -450,6 +492,8 @@ class EvaluatorTest extends TestCase
         (new Evaluator($repositoryTight))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             $successFifteenMinutesAgo,
             null,
             10,
@@ -469,6 +513,8 @@ class EvaluatorTest extends TestCase
         (new Evaluator($repositoryWide))->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
             $successFifteenMinutesAgo,
             null,
             60,
@@ -511,7 +557,7 @@ class EvaluatorTest extends TestCase
      */
     public function testHeartbeatRetiredReHeartbeatsTheLastConfirmedStatusForAPreviouslyReportedStoreView(): void
     {
-        $state = $this->stateWith(confirmed: SignalStatus::MildDrop, pending: SignalStatus::SevereDrop, sequence: 12);
+        $state = $this->stateWith(confirmed: SignalStatus::Normal, pending: SignalStatus::SevereDrop, sequence: 12);
 
         $savedState = null;
         $repository = $this->createMock(IntegrationHealthStateRepository::class);
@@ -525,13 +571,290 @@ class EvaluatorTest extends TestCase
         );
 
         self::assertNotNull($report);
-        self::assertSame(SignalStatus::MildDrop, $report->status);
+        self::assertSame(SignalStatus::Normal, $report->status);
         self::assertSame(ReportReason::Heartbeat, $report->reason);
         self::assertSame(12, $report->sequenceNumber);
 
-        self::assertSame(SignalStatus::MildDrop, $savedState->confirmedStatus);
+        self::assertSame(SignalStatus::Normal, $savedState->confirmedStatus);
         self::assertNull($savedState->pendingStatus);
         self::assertSame(13, $savedState->sequenceNumber);
+    }
+
+    /**
+     * Retiring a source while an anomaly is confirmed must not heartbeat DOWN
+     * forever: the source is gone, so it can never be observed recovering.
+     */
+    public function testHeartbeatRetiredDowngradesAnAnomalousConfirmedStatusToInsufficientDataAndKeepsIt(): void
+    {
+        $savedState = null;
+        $repository = $this->createMock(IntegrationHealthStateRepository::class);
+        $repository->method('get')->willReturn(
+            $this->stateWith(confirmed: SignalStatus::SevereDrop, pending: null, sequence: 12)
+        );
+        $repository->expects(self::once())->method('save')->with(self::captureInto($savedState));
+
+        $report = (new Evaluator($repository))->heartbeatRetiredIfPreviouslyReported(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            $this->now()
+        );
+
+        self::assertNotNull($report);
+        self::assertSame(SignalStatus::InsufficientData, $report->status);
+        self::assertSame(
+            ReportReason::Heartbeat,
+            $report->reason,
+            'Retiring a signal must never alert, so the downgrade is not a transition.'
+        );
+        self::assertSame(SignalStatus::InsufficientData, $savedState->confirmedStatus);
+        self::assertSame(13, $savedState->sequenceNumber);
+
+        // The next retired tick heartbeats the downgraded status, not the anomaly again.
+        $nextRepository = $this->createStub(IntegrationHealthStateRepository::class);
+        $nextRepository->method('get')->willReturn($savedState);
+
+        $nextReport = (new Evaluator($nextRepository))->heartbeatRetiredIfPreviouslyReported(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            $this->now()
+        );
+
+        self::assertNotNull($nextReport);
+        self::assertSame(SignalStatus::InsufficientData, $nextReport->status);
+        self::assertSame(ReportReason::Heartbeat, $nextReport->reason);
+        self::assertSame(13, $nextReport->sequenceNumber);
+    }
+
+    /**
+     * Bug: state is keyed on store view alone, so switching the monitored
+     * source carried the old source's last_success_at forward and reported a
+     * false OK for up to one expected interval.
+     */
+    public function testASourceChangeDiscardsTheOldSourcesEvidenceAndStillAdvancesTheSequence(): void
+    {
+        $state = new IntegrationHealthState(
+            storeViewId: self::STORE_VIEW_ID,
+            lastSuccessAt: $this->now()->modify('-5 minutes'),
+            lastFailureAt: null,
+            pendingStatus: SignalStatus::MildDrop,
+            confirmedStatus: SignalStatus::Normal,
+            sequenceNumber: 20,
+            lastReportedReason: ReportReason::Heartbeat,
+            sourceType: self::SOURCE_TYPE,
+            sourceIdentifier: 'previously_monitored_cron',
+            observingSince: $this->now()->modify('-1 year'),
+        );
+
+        $savedState = null;
+        $repository = $this->createMock(IntegrationHealthStateRepository::class);
+        $repository->method('get')->willReturn($state);
+        $repository->expects(self::once())->method('save')->with(self::captureInto($savedState));
+
+        $report = (new Evaluator($repository))->evaluate(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
+            null,
+            null,
+            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            $this->now()
+        );
+
+        self::assertSame(
+            SignalStatus::InsufficientData,
+            $report->status,
+            'The old source succeeding 5 minutes ago says nothing about the new one.'
+        );
+        self::assertSame(ReportReason::Heartbeat, $report->reason);
+        self::assertSame(20, $report->sequenceNumber);
+
+        self::assertNull($savedState->lastSuccessAt);
+        self::assertNull($savedState->lastFailureAt);
+        self::assertNull($savedState->pendingStatus);
+        self::assertSame(SignalStatus::InsufficientData, $savedState->confirmedStatus);
+        self::assertSame(self::SOURCE_IDENTIFIER, $savedState->sourceIdentifier);
+        self::assertEquals($this->now(), $savedState->observingSince);
+        self::assertSame(
+            21,
+            $savedState->sequenceNumber,
+            'The platform rejects a sequence number at or below its high-water mark, so a re-seed must not reset it.'
+        );
+    }
+
+    /**
+     * Switching away from a failing source must not read as the merchant's
+     * problem being fixed: the carried-over SEVERE_DROP would otherwise
+     * confirm NORMAL off the new source and send a "back to normal" alert.
+     */
+    public function testASourceChangeAwayFromAFailingSourceNeverReportsARecovery(): void
+    {
+        $failingState = new IntegrationHealthState(
+            storeViewId: self::STORE_VIEW_ID,
+            lastSuccessAt: null,
+            lastFailureAt: $this->now()->modify('-5 minutes'),
+            pendingStatus: null,
+            confirmedStatus: SignalStatus::SevereDrop,
+            sequenceNumber: 30,
+            lastReportedReason: ReportReason::Transition,
+            sourceType: self::SOURCE_TYPE,
+            sourceIdentifier: 'previously_monitored_cron',
+            observingSince: $this->now()->modify('-1 year'),
+        );
+
+        $seededState = null;
+        $repository = $this->createMock(IntegrationHealthStateRepository::class);
+        $repository->method('get')->willReturn($failingState);
+        $repository->expects(self::once())->method('save')->with(self::captureInto($seededState));
+
+        $seedTick = (new Evaluator($repository))->evaluate(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
+            null,
+            null,
+            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            $this->now()
+        );
+
+        self::assertSame(SignalStatus::InsufficientData, $seedTick->status);
+        self::assertSame(ReportReason::Heartbeat, $seedTick->reason);
+
+        // The new source then succeeds twice: confirming NORMAL out of the
+        // re-seed is warm-up finishing, so it must stay a heartbeat.
+        $pendingNormal = new IntegrationHealthState(
+            storeViewId: self::STORE_VIEW_ID,
+            lastSuccessAt: $this->now(),
+            lastFailureAt: null,
+            pendingStatus: SignalStatus::Normal,
+            confirmedStatus: $seededState->confirmedStatus,
+            sequenceNumber: $seededState->sequenceNumber,
+            lastReportedReason: ReportReason::Heartbeat,
+            sourceType: $seededState->sourceType,
+            sourceIdentifier: $seededState->sourceIdentifier,
+            observingSince: $seededState->observingSince,
+        );
+        $confirmRepository = $this->createStub(IntegrationHealthStateRepository::class);
+        $confirmRepository->method('get')->willReturn($pendingNormal);
+
+        $confirmTick = (new Evaluator($confirmRepository))->evaluate(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
+            $this->now(),
+            null,
+            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            $this->now()
+        );
+
+        self::assertSame(SignalStatus::Normal, $confirmTick->status);
+        self::assertSame(
+            ReportReason::Heartbeat,
+            $confirmTick->reason,
+            'A source change must not turn into a spurious recovery alert.'
+        );
+    }
+
+    /**
+     * Bug: with no evidence at all the raw status was DOWN regardless of the
+     * configured interval, so a freshly configured daily job alerted about
+     * two ticks after setup, before it could ever have run.
+     */
+    public function testAFreshlyConfiguredDailyJobStaysInsufficientDataInsideItsGraceWindow(): void
+    {
+        $savedState = null;
+        $repository = $this->createMock(IntegrationHealthStateRepository::class);
+        $repository->method('get')->willReturn($this->stateObservingSince($this->now()->modify('-2 hours')));
+        $repository->expects(self::once())->method('save')->with(self::captureInto($savedState));
+
+        $report = (new Evaluator($repository))->evaluate(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
+            null,
+            null,
+            1440,
+            $this->now()
+        );
+
+        self::assertSame(SignalStatus::InsufficientData, $report->status);
+        self::assertSame(ReportReason::Heartbeat, $report->reason);
+        self::assertNull(
+            $savedState->pendingStatus,
+            'Nothing may start debouncing towards SEVERE_DROP while the job is not yet due.'
+        );
+    }
+
+    /**
+     * The grace window only defers the DOWN verdict; a source that never runs
+     * at all must still be reported.
+     */
+    public function testSevereDropIsStillReportedOnceTheGraceWindowHasElapsed(): void
+    {
+        $elapsed = $this->stateObservingSince($this->now()->modify('-1441 minutes'));
+
+        $savedState = null;
+        $repository = $this->createMock(IntegrationHealthStateRepository::class);
+        $repository->method('get')->willReturn($elapsed);
+        $repository->expects(self::once())->method('save')->with(self::captureInto($savedState));
+
+        (new Evaluator($repository))->evaluate(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
+            null,
+            null,
+            1440,
+            $this->now()
+        );
+
+        self::assertSame(SignalStatus::SevereDrop, $savedState->pendingStatus);
+
+        $confirmRepository = $this->createStub(IntegrationHealthStateRepository::class);
+        $confirmRepository->method('get')->willReturn($savedState);
+
+        $confirmTick = (new Evaluator($confirmRepository))->evaluate(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
+            null,
+            null,
+            1440,
+            $this->now()
+        );
+
+        self::assertSame(SignalStatus::SevereDrop, $confirmTick->status);
+        self::assertSame(ReportReason::Transition, $confirmTick->reason);
+    }
+
+    /**
+     * A row written before observing_since existed must keep classifying as
+     * it did, rather than going quiet on installs that upgrade.
+     */
+    public function testARowWithNoObservingSinceBehavesAsIfTheGraceWindowHadElapsed(): void
+    {
+        $savedState = null;
+        $repository = $this->createMock(IntegrationHealthStateRepository::class);
+        $repository->method('get')->willReturn($this->stateObservingSince(null));
+        $repository->expects(self::once())->method('save')->with(self::captureInto($savedState));
+
+        (new Evaluator($repository))->evaluate(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
+            null,
+            null,
+            1440,
+            $this->now()
+        );
+
+        self::assertSame(SignalStatus::SevereDrop, $savedState->pendingStatus);
     }
 
     private static function captureInto(&$variable): \PHPUnit\Framework\Constraint\Callback
@@ -543,6 +866,10 @@ class EvaluatorTest extends TestCase
         });
     }
 
+    /**
+     * A state already observing the source under test, past its grace window,
+     * so these cases exercise the debounce rather than the re-seed path.
+     */
     private function stateWith(SignalStatus $confirmed, ?SignalStatus $pending, int $sequence): IntegrationHealthState
     {
         return new IntegrationHealthState(
@@ -552,6 +879,30 @@ class EvaluatorTest extends TestCase
             pendingStatus: $pending,
             confirmedStatus: $confirmed,
             sequenceNumber: $sequence,
+            lastReportedReason: null,
+            sourceType: self::SOURCE_TYPE,
+            sourceIdentifier: self::SOURCE_IDENTIFIER,
+            observingSince: $this->now()->modify('-1 year'),
+        );
+    }
+
+    /**
+     * A seeded state for the source under test with no evidence yet, so the
+     * grace window is the only thing separating INSUFFICIENT_DATA from DOWN.
+     */
+    private function stateObservingSince(?\DateTimeImmutable $observingSince): IntegrationHealthState
+    {
+        return new IntegrationHealthState(
+            storeViewId: self::STORE_VIEW_ID,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            pendingStatus: null,
+            confirmedStatus: SignalStatus::InsufficientData,
+            sequenceNumber: 4,
+            lastReportedReason: ReportReason::Heartbeat,
+            sourceType: self::SOURCE_TYPE,
+            sourceIdentifier: self::SOURCE_IDENTIFIER,
+            observingSince: $observingSince,
         );
     }
 

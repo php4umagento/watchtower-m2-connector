@@ -1235,6 +1235,8 @@ class ReportingServiceTest extends TestCase
             ->with(
                 1,
                 'default',
+                IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB,
+                'watchtower_example_cron',
                 $observation->latestSuccessAt,
                 $observation->latestFailureAt,
                 60,

@@ -28,6 +28,9 @@ class IntegrationHealthState
      * @param SignalStatus|null $confirmedStatus
      * @param int $sequenceNumber
      * @param ReportReason|null $lastReportedReason null only when no evaluation has ever run
+     * @param string|null $sourceType source this state describes; null on a pre-fingerprint row
+     * @param string|null $sourceIdentifier source this state describes; null on a pre-fingerprint row
+     * @param \DateTimeImmutable|null $observingSince when the current source started being observed
      */
     public function __construct(
         public readonly int $storeViewId,
@@ -37,16 +40,21 @@ class IntegrationHealthState
         public readonly ?SignalStatus $confirmedStatus,
         public readonly int $sequenceNumber,
         public readonly ?ReportReason $lastReportedReason = null,
+        public readonly ?string $sourceType = null,
+        public readonly ?string $sourceIdentifier = null,
+        public readonly ?\DateTimeImmutable $observingSince = null,
     ) {
     }
 
     /**
-     * Whether this is a fresh state with no prior confirmed status.
+     * Whether the accumulated evidence in this state still describes the given source.
      *
+     * @param string $sourceType
+     * @param string $sourceIdentifier
      * @return bool
      */
-    public function isFirstEvaluation(): bool
+    public function describesSource(string $sourceType, string $sourceIdentifier): bool
     {
-        return $this->confirmedStatus === null;
+        return $this->sourceType === $sourceType && $this->sourceIdentifier === $sourceIdentifier;
     }
 }

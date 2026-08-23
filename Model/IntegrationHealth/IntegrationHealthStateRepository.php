@@ -63,6 +63,9 @@ class IntegrationHealthStateRepository
             confirmedStatus: SignalStatus::tryFrom((string) $row['confirmed_status']),
             sequenceNumber: (int) $row['sequence_number'],
             lastReportedReason: ReportReason::tryFrom((string) ($row['last_reported_reason'] ?? '')),
+            sourceType: $this->toStringOrNull($row['source_type'] ?? null),
+            sourceIdentifier: $this->toStringOrNull($row['source_identifier'] ?? null),
+            observingSince: $this->toDateTime($row['observing_since'] ?? null),
         );
     }
 
@@ -87,6 +90,9 @@ class IntegrationHealthStateRepository
                 'confirmed_status' => $state->confirmedStatus?->value,
                 'last_reported_reason' => $state->lastReportedReason?->value,
                 'sequence_number' => $state->sequenceNumber,
+                'source_type' => $state->sourceType,
+                'source_identifier' => $state->sourceIdentifier,
+                'observing_since' => $state->observingSince?->format('Y-m-d H:i:s'),
             ],
             [
                 'last_success_at',
@@ -95,6 +101,9 @@ class IntegrationHealthStateRepository
                 'confirmed_status',
                 'last_reported_reason',
                 'sequence_number',
+                'source_type',
+                'source_identifier',
+                'observing_since',
             ]
         );
     }
@@ -112,5 +121,16 @@ class IntegrationHealthStateRepository
     private function toDateTime(?string $value): ?\DateTimeImmutable
     {
         return $value !== null ? new \DateTimeImmutable($value, new \DateTimeZone('UTC')) : null;
+    }
+
+    /**
+     * Normalizes a nullable column value to a string, keeping null as null.
+     *
+     * @param mixed $value
+     * @return string|null
+     */
+    private function toStringOrNull(mixed $value): ?string
+    {
+        return $value !== null ? (string) $value : null;
     }
 }

@@ -444,6 +444,8 @@ class ReportingService
         return $this->integrationHealthEvaluator->evaluate(
             $storeViewId,
             $storeViewCode,
+            $config->sourceType,
+            $config->sourceIdentifier,
             $observation->latestSuccessAt,
             $observation->latestFailureAt,
             $config->expectedMaxIntervalMinutes,

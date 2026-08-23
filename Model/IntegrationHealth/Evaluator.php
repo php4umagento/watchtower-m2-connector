@@ -14,9 +14,10 @@ use Watchtower\Connector\Model\Api\SignalStatus;
 
 /**
  * The integration_health state machine: the same two-evaluation debounce and
- * OK/FAILED/DOWN classification as CronHealth\Evaluator, scoped per store view
- * and source-agnostic -- it only classifies the success/failure timestamps its
- * caller resolved (see Model/ReportingService.php for the dispatch).
+ * OK/FAILED/DOWN classification as CronHealth\Evaluator, scoped per store view.
+ * It classifies the success/failure timestamps its caller resolved (see
+ * Model/ReportingService.php for the dispatch) and takes the source's identity
+ * only to notice when the state describes a source the merchant has replaced.
  *
  * Deliberately duplicated rather than sharing a base class, so a bug fixed here
  * prompts checking CronHealth\Evaluator and RateSignal\DispersionEvaluator too.
@@ -41,6 +42,8 @@ class Evaluator
      *
      * @param int $storeViewId
      * @param string $storeViewCode
+     * @param string $sourceType the source currently configured for this store view
+     * @param string $sourceIdentifier the source currently configured for this store view
      * @param \DateTimeImmutable|null $observedSuccessAt latest success observed THIS tick, if any
      * @param \DateTimeImmutable|null $observedFailureAt latest failure observed THIS tick, if any
      * @param int $expectedMaxIntervalMinutes this store view's own configured expected-max-interval
@@ -50,6 +53,8 @@ class Evaluator
     public function evaluate(
         int $storeViewId,
         string $storeViewCode,
+        string $sourceType,
+        string $sourceIdentifier,
         ?\DateTimeImmutable $observedSuccessAt,
         ?\DateTimeImmutable $observedFailureAt,
         int $expectedMaxIntervalMinutes,
@@ -57,33 +62,25 @@ class Evaluator
     ): MetricReport {
         $state = $this->repository->get($storeViewId);
 
+        // Every timestamp and status in the state describes the OLD source, so a
+        // source change (first configuration included) re-seeds from scratch.
+        // Detected here rather than on config write so no writer can bypass it.
+        if (!$state->describesSource($sourceType, $sourceIdentifier)) {
+            return $this->seedForSource($storeViewId, $storeViewCode, $sourceType, $sourceIdentifier, $state, $now);
+        }
+
         // Carried forward across ticks: no source table keeps durable history
         // beyond roughly an hour, so rawStatus() must be able to compare against
         // a success/failure from several ticks ago.
         $lastSuccessAt = $observedSuccessAt ?? $state->lastSuccessAt;
         $lastFailureAt = $observedFailureAt ?? $state->lastFailureAt;
-        $rawStatus = $this->rawStatus($lastSuccessAt, $lastFailureAt, $expectedMaxIntervalMinutes, $now);
-
-        // First evaluation for this store view: nothing to debounce against yet.
-        if ($state->isFirstEvaluation()) {
-            $this->save(
-                $storeViewId,
-                $lastSuccessAt,
-                $lastFailureAt,
-                null,
-                SignalStatus::InsufficientData,
-                $state->sequenceNumber + 1,
-                ReportReason::Transition
-            );
-
-            return $this->report(
-                $storeViewCode,
-                SignalStatus::InsufficientData,
-                $state->sequenceNumber,
-                $now,
-                ReportReason::Transition
-            );
-        }
+        $rawStatus = $this->rawStatus(
+            $lastSuccessAt,
+            $lastFailureAt,
+            $state->observingSince,
+            $expectedMaxIntervalMinutes,
+            $now
+        );
 
         if ($rawStatus === $state->confirmedStatus) {
             // No change; clear any stale pending status from a raw blip that never confirmed.
@@ -94,7 +91,10 @@ class Evaluator
                 null,
                 $state->confirmedStatus,
                 $state->sequenceNumber + 1,
-                ReportReason::Heartbeat
+                ReportReason::Heartbeat,
+                $sourceType,
+                $sourceIdentifier,
+                $state->observingSince
             );
 
             return $this->report(
@@ -128,7 +128,10 @@ class Evaluator
                 null,
                 $rawStatus,
                 $state->sequenceNumber + 1,
-                $reason
+                $reason,
+                $sourceType,
+                $sourceIdentifier,
+                $state->observingSince
             );
 
             return $this->report($storeViewCode, $rawStatus, $state->sequenceNumber, $now, $reason);
@@ -142,7 +145,10 @@ class Evaluator
             $rawStatus,
             $state->confirmedStatus,
             $state->sequenceNumber + 1,
-            ReportReason::Heartbeat
+            ReportReason::Heartbeat,
+            $sourceType,
+            $sourceIdentifier,
+            $state->observingSince
         );
 
         return $this->report(
@@ -155,12 +161,58 @@ class Evaluator
     }
 
     /**
+     * Re-seeds this store view for a newly configured source and reports the seed tick.
+     *
+     * Heartbeat, never Transition: the platform alerts on any transition,
+     * INSUFFICIENT_DATA included, and a merchant changing their own source
+     * has nothing to be alerted about.
+     *
+     * @param int $storeViewId
+     * @param string $storeViewCode
+     * @param string $sourceType
+     * @param string $sourceIdentifier
+     * @param IntegrationHealthState $state
+     * @param \DateTimeImmutable $now
+     * @return MetricReport
+     */
+    private function seedForSource(
+        int $storeViewId,
+        string $storeViewCode,
+        string $sourceType,
+        string $sourceIdentifier,
+        IntegrationHealthState $state,
+        \DateTimeImmutable $now
+    ): MetricReport {
+        $this->save(
+            $storeViewId,
+            null,
+            null,
+            null,
+            SignalStatus::InsufficientData,
+            $state->sequenceNumber + 1,
+            ReportReason::Heartbeat,
+            $sourceType,
+            $sourceIdentifier,
+            $now
+        );
+
+        return $this->report(
+            $storeViewCode,
+            SignalStatus::InsufficientData,
+            $state->sequenceNumber,
+            $now,
+            ReportReason::Heartbeat
+        );
+    }
+
+    /**
      * Keeps a previously-reported store view's integration_health pair alive after its source is cleared.
      *
      * Null when it never reported at all. The platform's staleness sweep has
      * no concept of a deliberately retired signal, so going silent would
-     * alert forever; re-heartbeating the last confirmed status keeps the
-     * pair fresh until normal ticks resume.
+     * alert forever; heartbeating keeps the pair fresh until normal ticks
+     * resume. An anomalous status is downgraded to INSUFFICIENT_DATA first,
+     * since a retired source can no longer be observed to recover.
      *
      * @param int $storeViewId
      * @param string $storeViewCode
@@ -173,28 +225,47 @@ class Evaluator
         \DateTimeImmutable $now
     ): ?MetricReport {
         $state = $this->repository->get($storeViewId);
+        $confirmedStatus = $state->confirmedStatus;
 
-        if ($state->isFirstEvaluation()) {
+        if ($confirmedStatus === null) {
             return null;
         }
 
+        $retiredStatus = $this->isAnomalous($confirmedStatus) ? SignalStatus::InsufficientData : $confirmedStatus;
+
+        // Fingerprint cleared so re-configuring the same source later re-seeds
+        // rather than resuming on evidence describing a since-retired source.
         $this->save(
             $storeViewId,
             $state->lastSuccessAt,
             $state->lastFailureAt,
             null,
-            $state->confirmedStatus,
+            $retiredStatus,
             $state->sequenceNumber + 1,
-            ReportReason::Heartbeat
+            ReportReason::Heartbeat,
+            null,
+            null,
+            null
         );
 
         return $this->report(
             $storeViewCode,
-            $state->confirmedStatus,
+            $retiredStatus,
             $state->sequenceNumber,
             $now,
             ReportReason::Heartbeat
         );
+    }
+
+    /**
+     * Whether a status is one integration_health raises as a problem.
+     *
+     * @param SignalStatus $status
+     * @return bool
+     */
+    private function isAnomalous(SignalStatus $status): bool
+    {
+        return $status === SignalStatus::MildDrop || $status === SignalStatus::SevereDrop;
     }
 
     /**
@@ -204,6 +275,7 @@ class Evaluator
      *
      * @param \DateTimeImmutable|null $lastSuccessAt
      * @param \DateTimeImmutable|null $lastFailureAt
+     * @param \DateTimeImmutable|null $observingSince null on a pre-fingerprint row: grace already elapsed
      * @param int $expectedMaxIntervalMinutes
      * @param \DateTimeImmutable $now
      * @return SignalStatus
@@ -211,6 +283,7 @@ class Evaluator
     private function rawStatus(
         ?\DateTimeImmutable $lastSuccessAt,
         ?\DateTimeImmutable $lastFailureAt,
+        ?\DateTimeImmutable $observingSince,
         int $expectedMaxIntervalMinutes,
         \DateTimeImmutable $now
     ): SignalStatus {
@@ -222,6 +295,15 @@ class Evaluator
 
         if ($lastFailureAt !== null && ($lastSuccessAt === null || $lastFailureAt > $lastSuccessAt)) {
             return SignalStatus::MildDrop;
+        }
+
+        // No evidence yet, and the source has not been observed for a full
+        // expected interval: a daily job would otherwise report DOWN within
+        // minutes of being configured.
+        $hasNoEvidenceAtAll = $lastSuccessAt === null && $lastFailureAt === null;
+
+        if ($hasNoEvidenceAtAll && $observingSince !== null && $observingSince > $window) {
+            return SignalStatus::InsufficientData;
         }
 
         return SignalStatus::SevereDrop;
@@ -237,6 +319,9 @@ class Evaluator
      * @param SignalStatus|null $confirmedStatus
      * @param int $sequenceNumber
      * @param ReportReason $reason the reason for the report this tick actually produces
+     * @param string|null $sourceType
+     * @param string|null $sourceIdentifier
+     * @param \DateTimeImmutable|null $observingSince
      * @return void
      */
     private function save(
@@ -247,6 +332,9 @@ class Evaluator
         ?SignalStatus $confirmedStatus,
         int $sequenceNumber,
         ReportReason $reason,
+        ?string $sourceType,
+        ?string $sourceIdentifier,
+        ?\DateTimeImmutable $observingSince,
     ): void {
         $this->repository->save(new IntegrationHealthState(
             storeViewId: $storeViewId,
@@ -256,6 +344,9 @@ class Evaluator
             confirmedStatus: $confirmedStatus,
             sequenceNumber: $sequenceNumber,
             lastReportedReason: $reason,
+            sourceType: $sourceType,
+            sourceIdentifier: $sourceIdentifier,
+            observingSince: $observingSince,
         ));
     }
 
