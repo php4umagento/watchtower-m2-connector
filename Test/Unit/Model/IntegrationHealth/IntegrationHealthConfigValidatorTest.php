@@ -144,7 +144,7 @@ class IntegrationHealthConfigValidatorTest extends TestCase
     }
 
     /**
-     * AvailableSourcesProvider::cronJobCodes() already excludes this
+     * AvailableSourcesProvider::cronJobCodesByGroup() already excludes this
      * module's own watchtower_* jobs from the admin picker's dropdown, but
      * that's a UI-only guard -- a direct POST to Save.php could otherwise
      * still configure the connector to monitor its own reporting job,

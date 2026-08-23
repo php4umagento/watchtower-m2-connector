@@ -21,7 +21,7 @@ define([
 
         /** @inheritdoc */
         _create: function () {
-            this._loadIdentifierOptions(this.options.cronJobsUrl, 'cron_job', 'jobCodes');
+            this._loadIdentifierOptions(this.options.cronJobsUrl, 'cron_job', 'jobGroups');
             this._loadIdentifierOptions(this.options.queueTopicsUrl, 'queue_consumer', 'topics');
 
             this.element.on('change', '[data-role="source-type"]', function (event) {
@@ -76,25 +76,32 @@ define([
                 dataType: 'json',
                 showLoader: true
             }).done(function (response) {
-                var values = response[responseKey] || [];
+                var groups = this._asOptionGroups(response[responseKey] || []);
 
                 this.element.find('[data-source-identifier-for="' + sourceType + '"]').each(function (index, select) {
                     var $select = $(select),
                         selected = $select.attr('data-selected') || '';
 
-                    values.forEach(function (value) {
-                        $('<option>').attr('value', value).text(value).appendTo($select);
+                    groups.forEach(function (group) {
+                        var $target = group.label ?
+                            $('<optgroup>').attr('label', group.label).appendTo($select) :
+                            $select;
+
+                        group.values.forEach(function (value) {
+                            $('<option>').attr('value', value).text(value).appendTo($target);
+                        });
                     });
 
-                    // The configured value may no longer be in the fetched
-                    // list (cron_schedule purges hourly, so a daily job's
-                    // own code is often absent) -- without this, a genuinely
-                    // configured row would silently render as
-                    // "-- Not configured --" on every page load. Caught in
-                    // C4's own architect review. A .filter() with a strict
+                    // The configured value may not be in the fetched list --
+                    // a job whose module was since removed, or one inserted
+                    // into cron_schedule after this page's own fetch. Without
+                    // this, a genuinely configured row would silently render
+                    // as "-- Not configured --" on page load. Caught in C4's
+                    // own architect review. A .filter() with a strict
                     // comparison, not a concatenated attribute selector: the
                     // value is admin-entered and must not be interpolated
-                    // into CSS-selector syntax.
+                    // into CSS-selector syntax. .find() reaches options
+                    // nested inside an <optgroup>, not just direct children.
                     var alreadyPresent = $select.find('option').filter(function (i, option) {
                         return option.value === selected;
                     }).length > 0;
@@ -106,6 +113,26 @@ define([
                     $select.val(selected);
                 });
             }.bind(this));
+        },
+
+        /**
+         * Normalises both response shapes this widget consumes into one
+         * list of option groups: cron jobs arrive grouped by cron group as
+         * {group, jobCodes} objects, queue topics as a flat array of
+         * strings. An empty label means "append straight to the select",
+         * so the flat case renders without a pointless single <optgroup>.
+         * @param {Array} values
+         * @returns {Array}
+         * @private
+         */
+        _asOptionGroups: function (values) {
+            if (values.length > 0 && typeof values[0] === 'object') {
+                return values.map(function (entry) {
+                    return {label: entry.group || '', values: entry.jobCodes || []};
+                });
+            }
+
+            return [{label: '', values: values}];
         },
 
         /**

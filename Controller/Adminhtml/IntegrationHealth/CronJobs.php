@@ -37,14 +37,23 @@ class CronJobs extends Action implements HttpGetActionInterface
     }
 
     /**
-     * Returns the selectable cron job codes.
+     * Returns the selectable cron job codes, grouped by cron group.
+     *
+     * Emitted as an ordered list of {group, jobCodes} objects rather than a
+     * group-keyed object so the provider's natural sort survives the JSON
+     * round trip: a JSON object's key order is not something the client is
+     * entitled to rely on.
      *
      * @return Json
      */
     public function execute(): Json
     {
-        return $this->resultJsonFactory->create()->setData([
-            'jobCodes' => $this->availableSourcesProvider->cronJobCodes(),
-        ]);
+        $jobGroups = [];
+
+        foreach ($this->availableSourcesProvider->cronJobCodesByGroup() as $group => $jobCodes) {
+            $jobGroups[] = ['group' => $group, 'jobCodes' => $jobCodes];
+        }
+
+        return $this->resultJsonFactory->create()->setData(['jobGroups' => $jobGroups]);
     }
 }
