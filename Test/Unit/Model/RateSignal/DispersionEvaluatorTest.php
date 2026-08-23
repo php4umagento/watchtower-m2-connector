@@ -367,7 +367,7 @@ class DispersionEvaluatorTest extends TestCase
 
     /**
      * Regression test for a real bug: a fresh install's baseline (Check A)
-     * warms up through INSUFFICIENT_DATA (the isFirstEvaluation() seed)
+     * warms up through INSUFFICIENT_DATA (the shared debounce's seed)
      * before its first real confirmed status. Confirming NORMAL straight out
      * of that seed must NOT report as a transition -- the signal was never
      * actually down, so this is baseline warm-up finishing, not a recovery.

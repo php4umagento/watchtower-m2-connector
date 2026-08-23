@@ -11,6 +11,7 @@ namespace Watchtower\Connector\Model\IntegrationHealth;
 use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\Debounce\TwoEvaluationDebounce;
 
 /**
  * The integration_health state machine: the same two-evaluation debounce and
@@ -32,9 +33,18 @@ class Evaluator
     /**
      * @param IntegrationHealthStateRepository $repository
      */
+    /** @var TwoEvaluationDebounce shared two-evaluation debounce, see that class */
+    private readonly TwoEvaluationDebounce $debounce;
+
+    /**
+     * @param IntegrationHealthStateRepository $repository
+     * @param TwoEvaluationDebounce|null $debounce stateless, no DI wiring needed
+     */
     public function __construct(
-        private readonly IntegrationHealthStateRepository $repository
+        private readonly IntegrationHealthStateRepository $repository,
+        ?TwoEvaluationDebounce $debounce = null,
     ) {
+        $this->debounce = $debounce ?? new TwoEvaluationDebounce();
     }
 
     /**
@@ -82,70 +92,20 @@ class Evaluator
             $now
         );
 
-        if ($rawStatus === $state->confirmedStatus) {
-            // No change; clear any stale pending status from a raw blip that never confirmed.
-            $this->save(
-                $storeViewId,
-                $lastSuccessAt,
-                $lastFailureAt,
-                null,
-                $state->confirmedStatus,
-                $state->sequenceNumber + 1,
-                ReportReason::Heartbeat,
-                $sourceType,
-                $sourceIdentifier,
-                $state->observingSince
-            );
+        // Reached only once the state already describes this source, so
+        // confirmedStatus is never null here: seedForSource() above owns the
+        // first-evaluation case for this signal, where the other evaluators
+        // let the shared debounce seed it.
+        $decision = $this->debounce->decide($rawStatus, $state->confirmedStatus, $state->pendingStatus);
 
-            return $this->report(
-                $storeViewCode,
-                $state->confirmedStatus,
-                $state->sequenceNumber,
-                $now,
-                ReportReason::Heartbeat
-            );
-        }
-
-        // Second consecutive differing tick: confirm using the current raw status.
-        // Requiring the two ticks to match each other would let a status alternating
-        // between two non-confirmed values never converge.
-        if ($state->pendingStatus !== null) {
-            // Same "warm-up finishing is not a recovery" reasoning as
-            // CronHealth\Evaluator -- confirming NORMAL straight out of the
-            // INSUFFICIENT_DATA seed on a fresh store view must not report as a
-            // transition, or the platform sends a "back to normal" email for an
-            // install that was never actually down. An anomalous status
-            // confirmed out of the seed is still a genuine first-detected
-            // problem and keeps alerting.
-            $reason = $state->confirmedStatus === SignalStatus::InsufficientData && $rawStatus === SignalStatus::Normal
-                ? ReportReason::Heartbeat
-                : ReportReason::Transition;
-
-            $this->save(
-                $storeViewId,
-                $lastSuccessAt,
-                $lastFailureAt,
-                null,
-                $rawStatus,
-                $state->sequenceNumber + 1,
-                $reason,
-                $sourceType,
-                $sourceIdentifier,
-                $state->observingSince
-            );
-
-            return $this->report($storeViewCode, $rawStatus, $state->sequenceNumber, $now, $reason);
-        }
-
-        // First differing tick: start the confirmation counter; still report the old confirmed value.
         $this->save(
             $storeViewId,
             $lastSuccessAt,
             $lastFailureAt,
-            $rawStatus,
-            $state->confirmedStatus,
+            $decision->nextPendingStatus,
+            $decision->nextConfirmedStatus,
             $state->sequenceNumber + 1,
-            ReportReason::Heartbeat,
+            $decision->reportReason,
             $sourceType,
             $sourceIdentifier,
             $state->observingSince
@@ -153,10 +113,10 @@ class Evaluator
 
         return $this->report(
             $storeViewCode,
-            $state->confirmedStatus,
+            $decision->reportStatus,
             $state->sequenceNumber,
             $now,
-            ReportReason::Heartbeat
+            $decision->reportReason
         );
     }
 

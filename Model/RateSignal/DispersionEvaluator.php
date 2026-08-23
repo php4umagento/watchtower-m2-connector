@@ -11,6 +11,7 @@ namespace Watchtower\Connector\Model\RateSignal;
 use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\Debounce\TwoEvaluationDebounce;
 use Watchtower\Connector\Model\Rollup\HourlyCountSample;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
 use Watchtower\Connector\Model\Seasonal\RetailCalendar;
@@ -141,6 +142,9 @@ class DispersionEvaluator
      */
     private readonly InterArrivalGapCalculator $gapCalculator;
 
+    /** @var TwoEvaluationDebounce shared two-evaluation debounce, see that class */
+    private readonly TwoEvaluationDebounce $debounce;
+
     /**
      * @var SeasonalIndexEvaluator
      */
@@ -161,6 +165,7 @@ class DispersionEvaluator
      * @param InterArrivalGapCalculator|null $gapCalculator stateless, no DI wiring needed
      * @param SeasonalIndexEvaluator|null $seasonalIndexEvaluator Check B, defaults to a real instance
      * @param TrendAdjustmentEvaluator|null $trendAdjustmentEvaluator Check C, defaults to a real instance
+     * @param TwoEvaluationDebounce|null $debounce stateless, no DI wiring needed
      */
     public function __construct(
         private readonly RollupRepository $rollupRepository,
@@ -168,8 +173,10 @@ class DispersionEvaluator
         ?InterArrivalGapCalculator $gapCalculator = null,
         ?SeasonalIndexEvaluator $seasonalIndexEvaluator = null,
         ?TrendAdjustmentEvaluator $trendAdjustmentEvaluator = null,
+        ?TwoEvaluationDebounce $debounce = null,
     ) {
         $this->gapCalculator = $gapCalculator ?? new InterArrivalGapCalculator();
+        $this->debounce = $debounce ?? new TwoEvaluationDebounce();
         $this->seasonalIndexEvaluator = $seasonalIndexEvaluator
             ?? new SeasonalIndexEvaluator($rollupRepository, new RetailCalendar());
         $this->trendAdjustmentEvaluator = $trendAdjustmentEvaluator ?? new TrendAdjustmentEvaluator($rollupRepository);
@@ -202,103 +209,25 @@ class DispersionEvaluator
         $state = $this->repository->get($storeViewId, $category);
         [$rawStatus, $drivingChecks] = $this->rawStatus($storeViewId, $category, $observedCount, $evaluatedHour);
 
-        // First evaluation for this pair: nothing to debounce against yet.
-        if ($state->isFirstEvaluation()) {
-            $this->save(
-                $storeViewId,
-                $category,
-                null,
-                SignalStatus::InsufficientData,
-                $state->sequenceNumber + 1,
-                ReportReason::Transition,
-                $drivingChecks
-            );
+        $decision = $this->debounce->decide($rawStatus, $state->confirmedStatus, $state->pendingStatus);
 
-            return $this->report(
-                $storeViewCode,
-                $category,
-                SignalStatus::InsufficientData,
-                $state->sequenceNumber,
-                $evaluatedAt,
-                ReportReason::Transition
-            );
-        }
-
-        if ($rawStatus === $state->confirmedStatus) {
-            // No change; clear any stale pending status from a raw blip that never confirmed.
-            $this->save(
-                $storeViewId,
-                $category,
-                null,
-                $state->confirmedStatus,
-                $state->sequenceNumber + 1,
-                ReportReason::Heartbeat,
-                $drivingChecks
-            );
-
-            return $this->report(
-                $storeViewCode,
-                $category,
-                $state->confirmedStatus,
-                $state->sequenceNumber,
-                $evaluatedAt,
-                ReportReason::Heartbeat
-            );
-        }
-
-        if ($state->pendingStatus !== null) {
-            // Same "warm-up finishing is not a recovery" reasoning as
-            // CronHealth\Evaluator and IntegrationHealth\Evaluator --
-            // confirming NORMAL straight out of the INSUFFICIENT_DATA seed
-            // (a fresh install's baseline just finished building, see
-            // BASELINE_WEEKS/LOW_VOLUME_LOOKBACK_WEEKS above) must not report
-            // as a transition, or the platform sends a "back to normal" email
-            // for a store view that was never actually down. An anomalous
-            // status confirmed out of the seed is still a genuine
-            // first-detected problem and keeps alerting.
-            $reason = $state->confirmedStatus === SignalStatus::InsufficientData && $rawStatus === SignalStatus::Normal
-                ? ReportReason::Heartbeat
-                : ReportReason::Transition;
-
-            // Second consecutive differing tick: confirm using the current raw status.
-            $this->save(
-                $storeViewId,
-                $category,
-                null,
-                $rawStatus,
-                $state->sequenceNumber + 1,
-                $reason,
-                $drivingChecks
-            );
-
-            return $this->report(
-                $storeViewCode,
-                $category,
-                $rawStatus,
-                $state->sequenceNumber,
-                $evaluatedAt,
-                $reason
-            );
-        }
-
-        // First differing tick: start the confirmation counter; still report the old confirmed value.
         $this->save(
             $storeViewId,
             $category,
-            $rawStatus,
-            $state->confirmedStatus,
+            $decision->nextPendingStatus,
+            $decision->nextConfirmedStatus,
             $state->sequenceNumber + 1,
-            ReportReason::Heartbeat,
+            $decision->reportReason,
             $drivingChecks
         );
 
         return $this->report(
             $storeViewCode,
             $category,
-            $state->confirmedStatus,
+            $decision->reportStatus,
             $state->sequenceNumber,
             $evaluatedAt,
-            ReportReason::Heartbeat
+            $decision->reportReason
         );
     }
 

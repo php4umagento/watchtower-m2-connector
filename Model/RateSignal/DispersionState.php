@@ -39,14 +39,4 @@ class DispersionState
         public readonly array $ensembleDrivingChecks = [],
     ) {
     }
-
-    /**
-     * Whether this is a fresh state with no prior confirmed status.
-     *
-     * @return bool
-     */
-    public function isFirstEvaluation(): bool
-    {
-        return $this->confirmedStatus === null;
-    }
 }

@@ -44,7 +44,7 @@ class HealthStateRepositoryTest extends TestCase
     /**
      * The exact scenario the review flagged: pending_status/confirmed_status
      * are nullable columns, and a row can have both NULL right after the
-     * very first evaluation (Evaluator's isFirstEvaluation() branch saves
+     * very first evaluation (the shared debounce's null-confirmed seed saves
      * confirmedStatus as INSUFFICIENT_DATA, not null, but pending_status
      * stays null on every branch that doesn't set it). tryFrom() against a
      * NULL column must map to null, not throw or silently coerce to a

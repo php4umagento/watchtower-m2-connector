@@ -37,14 +37,4 @@ class HealthState
         public readonly ?ReportReason $lastReportedReason = null,
     ) {
     }
-
-    /**
-     * Whether this is a fresh state with no prior confirmed status.
-     *
-     * @return bool
-     */
-    public function isFirstEvaluation(): bool
-    {
-        return $this->confirmedStatus === null;
-    }
 }

@@ -11,6 +11,7 @@ namespace Watchtower\Connector\Model\CronHealth;
 use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\Debounce\TwoEvaluationDebounce;
 use Watchtower\Connector\Model\HealthState\HealthState;
 use Watchtower\Connector\Model\HealthState\HealthStateRepository;
 
@@ -19,9 +20,10 @@ use Watchtower\Connector\Model\HealthState\HealthStateRepository;
  * MetricReport: a heartbeat repeating the last confirmed status, or a transition
  * once a differing raw status has held for two consecutive ticks.
  *
- * RateSignal\DispersionEvaluator and IntegrationHealth\Evaluator duplicate this
- * same debounce shape rather than sharing a base class -- a bug fixed here
- * probably exists in those copies too.
+ * The debounce itself lives in Debounce\TwoEvaluationDebounce, shared with
+ * every other evaluator. It used to be copied into each of them, and this
+ * docblock used to warn that a bug fixed here probably existed in those
+ * copies too; that is no longer the case.
  */
 class Evaluator
 {
@@ -35,14 +37,20 @@ class Evaluator
      */
     private const EXPECTED_MAX_INTERVAL_MINUTES = 30;
 
+    /** @var TwoEvaluationDebounce shared two-evaluation debounce, see that class */
+    private readonly TwoEvaluationDebounce $debounce;
+
     /**
      * @param CronScheduleObserver $observer
      * @param HealthStateRepository $repository
+     * @param TwoEvaluationDebounce|null $debounce stateless, no DI wiring needed
      */
     public function __construct(
         private readonly CronScheduleObserver $observer,
         private readonly HealthStateRepository $repository,
+        ?TwoEvaluationDebounce $debounce = null,
     ) {
+        $this->debounce = $debounce ?? new TwoEvaluationDebounce();
     }
 
     /**
@@ -62,74 +70,23 @@ class Evaluator
         $lastFailureAt = $observation->latestFailureAt ?? $state->lastFailureAt;
         $rawStatus = $this->rawStatus($lastSuccessAt, $lastFailureAt, $now);
 
-        // First evaluation: nothing to debounce against yet. Seeding
-        // INSUFFICIENT_DATA as the confirmed baseline stops a single poll moments
-        // after activation from reporting a false DOWN.
-        if ($state->isFirstEvaluation()) {
-            $this->save(
-                $lastSuccessAt,
-                $lastFailureAt,
-                null,
-                SignalStatus::InsufficientData,
-                $state->sequenceNumber + 1,
-                ReportReason::Transition
-            );
+        $decision = $this->debounce->decide($rawStatus, $state->confirmedStatus, $state->pendingStatus);
 
-            return $this->report(
-                SignalStatus::InsufficientData,
-                $state->sequenceNumber,
-                $now,
-                ReportReason::Transition
-            );
-        }
-
-        if ($rawStatus === $state->confirmedStatus) {
-            // No change; clear any stale pending status from a raw blip that never confirmed.
-            $this->save(
-                $lastSuccessAt,
-                $lastFailureAt,
-                null,
-                $state->confirmedStatus,
-                $state->sequenceNumber + 1,
-                ReportReason::Heartbeat
-            );
-
-            return $this->report($state->confirmedStatus, $state->sequenceNumber, $now, ReportReason::Heartbeat);
-        }
-
-        // Second consecutive differing tick: confirm using the current raw status,
-        // even if it differs from the pending one. Requiring the two to match would
-        // let an alternating status (MILD_DROP, SEVERE_DROP, ...) never converge.
-        if ($state->pendingStatus !== null) {
-            // Confirming NORMAL straight out of the INSUFFICIENT_DATA seed (see
-            // isFirstEvaluation() above) is warm-up finishing on a fresh install,
-            // not a recovery -- cron was never actually down. Reporting it as a
-            // transition makes the platform send an unconditional "back to
-            // normal" email (App\Notifications\InstallAlertNotification in
-            // watchtower-saas) for an account that never had a problem.
-            // Confirming an anomalous status out of the seed is still a genuine
-            // first-detected outage, so that case stays a transition and still
-            // alerts.
-            $reason = $state->confirmedStatus === SignalStatus::InsufficientData && $rawStatus === SignalStatus::Normal
-                ? ReportReason::Heartbeat
-                : ReportReason::Transition;
-
-            $this->save($lastSuccessAt, $lastFailureAt, null, $rawStatus, $state->sequenceNumber + 1, $reason);
-
-            return $this->report($rawStatus, $state->sequenceNumber, $now, $reason);
-        }
-
-        // First differing tick: start the confirmation counter; still report the old confirmed value.
         $this->save(
             $lastSuccessAt,
             $lastFailureAt,
-            $rawStatus,
-            $state->confirmedStatus,
+            $decision->nextPendingStatus,
+            $decision->nextConfirmedStatus,
             $state->sequenceNumber + 1,
-            ReportReason::Heartbeat
+            $decision->reportReason
         );
 
-        return $this->report($state->confirmedStatus, $state->sequenceNumber, $now, ReportReason::Heartbeat);
+        return $this->report(
+            $decision->reportStatus,
+            $state->sequenceNumber,
+            $now,
+            $decision->reportReason
+        );
     }
 
     /**

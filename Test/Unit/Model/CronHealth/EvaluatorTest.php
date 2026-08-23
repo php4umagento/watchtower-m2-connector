@@ -132,7 +132,7 @@ class EvaluatorTest extends TestCase
 
     /**
      * Regression test for a real bug: a fresh install's cron_health warms up
-     * through INSUFFICIENT_DATA (the isFirstEvaluation() seed) before its
+     * through INSUFFICIENT_DATA (the shared debounce's seed) before its
      * first real confirmed status. Confirming NORMAL straight out of that
      * seed must NOT report as a transition -- cron was never actually down,
      * so this is warm-up finishing, not a recovery. Reporting it as a
