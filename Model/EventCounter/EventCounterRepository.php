@@ -174,6 +174,39 @@ class EventCounterRepository
     }
 
     /**
+     * Hourly counts for one store view/event name over a lookback window.
+     *
+     * Keyed by UTC top-of-hour string, for the last $days before $before.
+     * Only hours that actually have a row appear, so a store with no failures
+     * in a given hour simply has no key for it -- the caller decides what a
+     * missing hour means. Excludes $before's own hour, so a caller learning
+     * from history never includes the hour it is currently evaluating.
+     *
+     * @param int $storeViewId
+     * @param string $eventName
+     * @param int $days how many days back from $before to include
+     * @param \DateTimeImmutable $before hours strictly earlier than this instant's top-of-hour are returned
+     * @return array<string, int> hour_bucket string => count
+     */
+    public function countsInWindow(int $storeViewId, string $eventName, int $days, \DateTimeImmutable $before): array
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $table = $this->resourceConnection->getTableName(self::COUNTER_TABLE);
+
+        $rows = $connection->fetchPairs(
+            $connection->select()
+                ->from($table, ['hour_bucket', 'count'])
+                ->where('store_view_id = ?', $storeViewId)
+                ->where('event_name = ?', $eventName)
+                ->where('hour_bucket >= ?', $this->utcDate($before, -$days))
+                ->where('hour_bucket < ?', $this->formatUtcHour($before))
+                ->order('hour_bucket ASC')
+        );
+
+        return array_map(static fn ($count): int => (int) $count, $rows);
+    }
+
+    /**
      * The current dropped-event count for one event name/hour, or 0 when no row exists yet.
      *
      * @param string $eventName

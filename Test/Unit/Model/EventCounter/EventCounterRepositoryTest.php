@@ -222,6 +222,52 @@ class EventCounterRepositoryTest extends TestCase
         self::assertSame(['watchtower_event_drop_counter', ['hour_bucket < ?' => $expectedCutoff]], $deletedCalls[1]);
     }
 
+    public function testCountsInWindowScopesByStoreViewAndEventNameAndExcludesTheReferenceHour(): void
+    {
+        $seenWhere = [];
+        $select = $this->createStub(Select::class);
+        $select->method('from')->willReturnSelf();
+        $select->method('where')->willReturnCallback(
+            function (string $condition, mixed $value = null) use ($select, &$seenWhere) {
+                $seenWhere[] = [$condition, $value];
+
+                return $select;
+            }
+        );
+        $select->method('order')->willReturnSelf();
+
+        $connection = $this->createStub(AdapterInterface::class);
+        $connection->method('select')->willReturn($select);
+        // fetchPairs returns hour_bucket => count; the raw DB strings arrive
+        // as-is and are cast to int.
+        $connection->method('fetchPairs')->willReturn([
+            '2026-08-01 10:00:00' => '3',
+            '2026-08-01 11:00:00' => '0',
+        ]);
+
+        $resourceConnection = $this->createStub(ResourceConnection::class);
+        $resourceConnection->method('getConnection')->willReturn($connection);
+        $resourceConnection->method('getTableName')->willReturnArgument(0);
+
+        $before = new \DateTimeImmutable('2026-08-13T15:30:00+00:00');
+        $result = (new EventCounterRepository($resourceConnection))->countsInWindow(
+            7,
+            'sales_model_service_quote_submit_failure',
+            28,
+            $before
+        );
+
+        self::assertSame(['2026-08-01 10:00:00' => 3, '2026-08-01 11:00:00' => 0], $result);
+        self::assertContains(['store_view_id = ?', 7], $seenWhere);
+        self::assertContains(['event_name = ?', 'sales_model_service_quote_submit_failure'], $seenWhere);
+        // Upper bound is the reference hour's top-of-hour (formatUtcHour), so
+        // the reference hour itself is excluded. Lower bound keeps minutes
+        // (utcDate), matching RollupRepository::allHourlyCountsInWindow(); in
+        // production `before` is already top-of-hour so both align.
+        self::assertContains(['hour_bucket < ?', '2026-08-13 15:00:00'], $seenWhere);
+        self::assertContains(['hour_bucket >= ?', '2026-07-16 15:30:00'], $seenWhere);
+    }
+
     public function testPruneReturnsZeroesWhenNothingIsPastRetention(): void
     {
         $connection = $this->createStub(AdapterInterface::class);

@@ -58,6 +58,16 @@ class Evaluator
      * stated preference for this class of signal.
      *
      * Revisit against real ingested data before treating either as settled.
+     *
+     * Kept FIXED, unlike checkout_failure, which learns a tighter per-store
+     * threshold (LearnedThresholdCalculator). That mechanism's median
+     * statistic does not transfer here: admin sign-in failures are sparse and
+     * bursty, so essentially every install's median hourly failure count is
+     * zero and a learned threshold would collapse onto a single floor,
+     * differentiating no install from any other. Detecting a burst against a
+     * quiet baseline needs a high-percentile statistic rather than a median;
+     * that is a separate mechanism, deferred until there is real data to
+     * design and calibrate it against.
      */
     private const MILD_FAILURE_THRESHOLD = 10;
     private const SEVERE_FAILURE_THRESHOLD = 25;

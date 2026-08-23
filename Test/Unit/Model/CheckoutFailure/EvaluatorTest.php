@@ -13,10 +13,12 @@ use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\CheckoutFailure\Evaluator;
+use Watchtower\Connector\Model\CheckoutFailure\RatioHistory;
 use Watchtower\Connector\Model\Debounce\TwoEvaluationDebounce;
 use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionState;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
+use Watchtower\Connector\Model\Threshold\LearnedThresholdCalculator;
 
 class EvaluatorTest extends TestCase
 {
@@ -241,12 +243,94 @@ class EvaluatorTest extends TestCase
     }
 
     /**
+     * The learned threshold in action: a store whose own history is all
+     * clean hours tightens its severe threshold onto the floor (0.15), so a
+     * 20% failure hour that the conservative fixed default (0.50) would call
+     * NORMAL is now SEVERE_DROP. One failure in five attempts is a 20% ratio.
+     */
+    public function testACleanStoresLearnedThresholdTightensBelowTheFixedDefault(): void
+    {
+        $history = $this->ratioHistoryReturning(array_fill(0, 120, 0.0));
+
+        $report = $this->evaluateWith(
+            failures: 1,
+            orders: 4,
+            confirmed: SignalStatus::SevereDrop,
+            pending: SignalStatus::SevereDrop,
+            ratioHistory: $history
+        );
+
+        self::assertSame(SignalStatus::SevereDrop, $report->status);
+    }
+
+    /**
+     * The control for the test above: the identical 20% hour, but with no
+     * history, falls back to the fixed default and is NORMAL. This is what
+     * proves the SEVERE_DROP above came from the learned threshold and not
+     * from something else.
+     */
+    public function testTheSameHourIsNormalUnderTheFixedDefaultWithNoHistory(): void
+    {
+        $report = $this->evaluateWith(
+            failures: 1,
+            orders: 4,
+            confirmed: SignalStatus::Normal,
+            pending: SignalStatus::Normal
+        );
+
+        self::assertSame(SignalStatus::Normal, $report->status);
+    }
+
+    /**
+     * The sample gate: below the learning minimum the fixed defaults still
+     * apply, so the same 20% hour is NORMAL despite the (too short) clean
+     * history. A store cannot tighten its threshold off a handful of hours.
+     */
+    public function testBelowTheLearningSampleFloorTheFixedDefaultsApply(): void
+    {
+        $history = $this->ratioHistoryReturning(array_fill(0, 50, 0.0));
+
+        $report = $this->evaluateWith(
+            failures: 1,
+            orders: 4,
+            confirmed: SignalStatus::Normal,
+            pending: SignalStatus::Normal,
+            ratioHistory: $history
+        );
+
+        self::assertSame(SignalStatus::Normal, $report->status);
+    }
+
+    /**
+     * The clamp's safety half: a store whose own normal is high (median 30%)
+     * would, unclamped, earn a very permissive threshold. Clamped to the
+     * fixed default, a 40% hour is still MILD_DROP, never NORMAL -- learning
+     * can only ever make the signal MORE sensitive than its conservative
+     * default, never less.
+     */
+    public function testALearnedThresholdNeverLoosensPastTheFixedDefault(): void
+    {
+        $history = $this->ratioHistoryReturning(array_fill(0, 120, 0.30));
+
+        $report = $this->evaluateWith(
+            failures: 40,
+            orders: 60,
+            confirmed: SignalStatus::MildDrop,
+            pending: SignalStatus::MildDrop,
+            ratioHistory: $history
+        );
+
+        self::assertSame(SignalStatus::MildDrop, $report->status);
+    }
+
+    /**
      * @param int $failures
      * @param int $orders
      * @param SignalStatus|null $confirmed
      * @param SignalStatus|null $pending
      * @param int $sequenceNumber
      * @param DispersionState|null $saved
+     * @param RatioHistory|null $ratioHistory
      * @return \Watchtower\Connector\Model\Api\MetricReport
      */
     private function evaluateWith(
@@ -255,14 +339,15 @@ class EvaluatorTest extends TestCase
         ?SignalStatus $confirmed,
         ?SignalStatus $pending,
         int $sequenceNumber = 1,
-        ?DispersionState &$saved = null
+        ?DispersionState &$saved = null,
+        ?RatioHistory $ratioHistory = null
     ) {
         $counter = $this->createStub(EventCounterRepository::class);
         $counter->method('countFor')->willReturn($failures);
 
         $repository = $this->stateRepository($confirmed, $pending, $sequenceNumber, $saved);
 
-        return $this->evaluator($counter, $repository)->evaluate(
+        return $this->evaluator($counter, $repository, $ratioHistory)->evaluate(
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
             $orders,
@@ -273,9 +358,40 @@ class EvaluatorTest extends TestCase
 
     private function evaluator(
         EventCounterRepository $counter,
-        DispersionStateRepository $repository
+        DispersionStateRepository $repository,
+        ?RatioHistory $ratioHistory = null
     ): Evaluator {
-        return new Evaluator($counter, $repository, new TwoEvaluationDebounce());
+        // Default: no history, so the calculator returns the fixed defaults
+        // unchanged and every test below that predates the learned thresholds
+        // keeps asserting against 0.25 / 0.50 exactly as before.
+        if ($ratioHistory === null) {
+            $ratioHistory = $this->createStub(RatioHistory::class);
+            $ratioHistory->method('qualifyingRatios')->willReturn([]);
+        }
+
+        return new Evaluator(
+            $counter,
+            $repository,
+            new TwoEvaluationDebounce(),
+            $ratioHistory,
+            new LearnedThresholdCalculator()
+        );
+    }
+
+    /**
+     * A RatioHistory stub returning a fixed series of past ratios, so the
+     * learned-threshold tests can drive the calculator without touching the
+     * database.
+     *
+     * @param float[] $ratios
+     * @return RatioHistory
+     */
+    private function ratioHistoryReturning(array $ratios): RatioHistory
+    {
+        $history = $this->createStub(RatioHistory::class);
+        $history->method('qualifyingRatios')->willReturn($ratios);
+
+        return $history;
     }
 
     private function stateRepository(

@@ -16,13 +16,15 @@ use Watchtower\Connector\Model\EventCounter\CheckoutFailureObserver;
 use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionState;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
+use Watchtower\Connector\Model\Threshold\LearnedThresholdCalculator;
+use Watchtower\Connector\Model\Threshold\LearnedThresholds;
 
 /**
  * The checkout_failure signal: what share of this hour's order-placement
- * attempts failed (connector-metrics-spec.md v2.7, "Ratio-Based Signals").
+ * attempts failed (connector-metrics-spec.md v2.7, "Threshold-Based Signals").
  *
- * A FOURTH computation shape, not a sixth rate-based signal, and the reason is
- * arithmetic rather than taste. Failures sit at or near zero in a healthy
+ * A distinct computation shape, not a sixth rate-based signal, and the reason
+ * is arithmetic rather than taste. Failures sit at or near zero in a healthy
  * hour, so a median/MAD baseline over that series has MAD = 0 and the modified
  * z-score DispersionEvaluator relies on is undefined or saturated. The
  * dispersion detector cannot run on this data at all.
@@ -40,6 +42,14 @@ use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
  * proportion", never "still collecting history", which is why the platform's
  * TrackedMetricEvent::hasBaseline() returns false for it and no completion
  * date is ever projected.
+ *
+ * The thresholds it judges against are refined per store over time
+ * (LearnedThresholdCalculator, Q1), but that is a refinement layered on top of
+ * the fixed defaults, never a prerequisite: with no history yet the fixed
+ * defaults apply unchanged, so the "live in its first hour" property above
+ * holds exactly as before. The learned pair can only ever tighten the fixed
+ * defaults within a bounded range, so a store cannot learn its way to being
+ * less sensitive than the conservative default, nor to an alert storm.
  */
 class Evaluator
 {
@@ -72,6 +82,17 @@ class Evaluator
     private const SEVERE_FAILURE_RATIO = 0.50;
 
     /**
+     * The lowest a per-store learned threshold may tighten to (see
+     * LearnedThresholdCalculator). A clean store, whose own history is
+     * essentially all zero-ratio hours, lands here rather than at zero, which
+     * would alert on a single genuine card decline. Above plausible
+     * single-hour decline noise, below the fixed defaults. PLACEHOLDER, open
+     * exactly as the fixed thresholds are (connector-failure-signals-prd.md Q1).
+     */
+    private const MILD_FAILURE_RATIO_FLOOR = 0.08;
+    private const SEVERE_FAILURE_RATIO_FLOOR = 0.15;
+
+    /**
      * Below this many attempts in the hour, a ratio is meaningless: one
      * attempt that failed is 100%. Mirrors DispersionEvaluator::VOLUME_FLOOR,
      * which draws the same line for the same reason.
@@ -95,11 +116,15 @@ class Evaluator
      * @param EventCounterRepository $eventCounterRepository
      * @param DispersionStateRepository $repository reused: keyed (store view, category), which fits exactly
      * @param TwoEvaluationDebounce $debounce
+     * @param RatioHistory $ratioHistory reconstructs this store's own past ratios for the learned thresholds
+     * @param LearnedThresholdCalculator $thresholdCalculator refines the fixed thresholds against that history
      */
     public function __construct(
         private readonly EventCounterRepository $eventCounterRepository,
         private readonly DispersionStateRepository $repository,
         private readonly TwoEvaluationDebounce $debounce,
+        private readonly RatioHistory $ratioHistory,
+        private readonly LearnedThresholdCalculator $thresholdCalculator,
     ) {
     }
 
@@ -127,7 +152,15 @@ class Evaluator
             $evaluatedHour
         );
 
-        $rawStatus = $this->rawStatus($failureCount, $orderCount);
+        $thresholds = $this->thresholdCalculator->effective(
+            $this->ratioHistory->qualifyingRatios($storeViewId, self::MIN_ATTEMPTS_FOR_RATIO, $evaluatedHour),
+            self::MILD_FAILURE_RATIO,
+            self::SEVERE_FAILURE_RATIO,
+            self::MILD_FAILURE_RATIO_FLOOR,
+            self::SEVERE_FAILURE_RATIO_FLOOR
+        );
+
+        $rawStatus = $this->rawStatus($failureCount, $orderCount, $thresholds);
         $decision = $this->debounce->decide($rawStatus, $state->confirmedStatus, $state->pendingStatus);
 
         $this->repository->save(new DispersionState(
@@ -160,9 +193,10 @@ class Evaluator
      *
      * @param int $failureCount
      * @param int $orderCount
+     * @param LearnedThresholds $thresholds fixed defaults, or this store's own tighter learned pair
      * @return SignalStatus
      */
-    private function rawStatus(int $failureCount, int $orderCount): SignalStatus
+    private function rawStatus(int $failureCount, int $orderCount, LearnedThresholds $thresholds): SignalStatus
     {
         $attempts = $failureCount + $orderCount;
 
@@ -181,11 +215,11 @@ class Evaluator
 
         $ratio = $failureCount / $attempts;
 
-        if ($ratio >= self::SEVERE_FAILURE_RATIO) {
+        if ($ratio >= $thresholds->severe) {
             return SignalStatus::SevereDrop;
         }
 
-        if ($ratio >= self::MILD_FAILURE_RATIO) {
+        if ($ratio >= $thresholds->mild) {
             return SignalStatus::MildDrop;
         }
 
