@@ -11,8 +11,10 @@ namespace Watchtower\Connector\Model\EventCounter;
 use Magento\Framework\Event\Observer;
 use Magento\Framework\Event\ObserverInterface;
 use Magento\Framework\Exception\NoSuchEntityException;
+use Psr\Log\LoggerInterface;
 use Magento\Store\Model\Store;
 use Magento\Store\Model\StoreManagerInterface;
+use Watchtower\Connector\Model\Config;
 
 /**
  * Increments watchtower_event_counter for the customer_login and
@@ -36,33 +38,52 @@ class CustomerSessionObserver implements ObserverInterface
     /**
      * @param EventCounterRepository $eventCounterRepository
      * @param StoreManagerInterface $storeManager
+     * @param Config $config
+     * @param LoggerInterface $logger
      */
     public function __construct(
         private readonly EventCounterRepository $eventCounterRepository,
-        private readonly StoreManagerInterface $storeManager
+        private readonly StoreManagerInterface $storeManager,
+        private readonly Config $config,
+        private readonly LoggerInterface $logger
     ) {
     }
 
     /**
      * Increments the appropriate counter for a dispatched customer_login or customer_logout event.
      *
+     * Gated and wrapped for the same reasons CheckoutFailureObserver is, and
+     * every observer this module ships must match: a merchant who disabled the
+     * module expects it to stop writing to their database, and
+     * Magento\Framework\Event\Invoker\InvokerDefault provides no try/catch, so
+     * an uncaught throw here would break a shopper's login. ObserverSafetyTest
+     * enforces both statically across every class in etc/events.xml.
+     *
      * @param Observer $observer
      * @return void
      */
     public function execute(Observer $observer): void
     {
-        $eventName = (string) $observer->getEvent()->getName();
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        try {
+            if (!$this->config->isEnabled()) {
+                return;
+            }
 
-        $storeViewId = $this->resolveStoreViewId();
+            $eventName = (string) $observer->getEvent()->getName();
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
-        if ($storeViewId === null) {
-            $this->eventCounterRepository->incrementDropped($eventName, $now);
+            $storeViewId = $this->resolveStoreViewId();
 
-            return;
+            if ($storeViewId === null) {
+                $this->eventCounterRepository->incrementDropped($eventName, $now);
+
+                return;
+            }
+
+            $this->eventCounterRepository->increment($storeViewId, $eventName, $now);
+        } catch (\Throwable $e) {
+            $this->logger->critical($e);
         }
-
-        $this->eventCounterRepository->increment($storeViewId, $eventName, $now);
     }
 
     /**

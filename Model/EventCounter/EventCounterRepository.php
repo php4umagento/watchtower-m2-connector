@@ -38,11 +38,61 @@ class EventCounterRepository
     public const RETENTION_DAYS = 90;
 
     /**
+     * Must match the event_name column width in etc/db_schema.xml for BOTH
+     * counter tables.
+     *
+     * Enforced rather than trusted because of how this failed once: the
+     * column was varchar(32), CheckoutFailureObserver wrote the 40-character
+     * 'sales_model_service_quote_submit_failure', and MySQL in its default
+     * non-strict mode truncated it to 32 without complaint. The writer then
+     * stored one key while the reader queried another, so the signal read
+     * zero forever and looked like a store with no failures rather than a
+     * broken counter. Worse, the truncated form collides with
+     * sales_model_service_quote_submit_before/_success, which share that
+     * 32-character prefix, so two different events would have summed into
+     * one row.
+     *
+     * A store running MySQL in strict mode would have thrown instead, which
+     * the observers catch, so that install would have logged and carried on
+     * with the same silent zero. Neither mode is detectable from the data.
+     */
+    public const MAX_EVENT_NAME_LENGTH = 64;
+
+    /**
      * @param ResourceConnection $resourceConnection
      */
     public function __construct(
         private readonly ResourceConnection $resourceConnection
     ) {
+    }
+
+    /**
+     * Fails loudly on a name the event_name column cannot hold.
+     *
+     * The alternative is letting the database silently shorten it.
+     *
+     * The caller is always this module's own code with a compile-time
+     * constant name, so this can only fire during development, which is
+     * exactly when it is useful. Observers wrap their bodies in a
+     * \Throwable catch, so even in the impossible case of this reaching a
+     * merchant it degrades to a logged error rather than a broken checkout.
+     *
+     * @param string $eventName
+     * @return void
+     * @throws \LengthException
+     */
+    private function assertEventNameFits(string $eventName): void
+    {
+        if (strlen($eventName) > self::MAX_EVENT_NAME_LENGTH) {
+            throw new \LengthException(sprintf(
+                'Event name "%s" is %d characters, exceeding the %d-character event_name column. '
+                . 'Widen the column in etc/db_schema.xml rather than shortening the name, so the '
+                . 'counter stays literal about which event it observed.',
+                $eventName,
+                strlen($eventName),
+                self::MAX_EVENT_NAME_LENGTH
+            ));
+        }
     }
 
     /**
@@ -55,6 +105,8 @@ class EventCounterRepository
      */
     public function increment(int $storeViewId, string $eventName, \DateTimeImmutable $now): void
     {
+        $this->assertEventNameFits($eventName);
+
         $connection = $this->resourceConnection->getConnection();
         $table = $this->resourceConnection->getTableName(self::COUNTER_TABLE);
 
@@ -81,6 +133,8 @@ class EventCounterRepository
      */
     public function incrementDropped(string $eventName, \DateTimeImmutable $now): void
     {
+        $this->assertEventNameFits($eventName);
+
         $connection = $this->resourceConnection->getConnection();
         $table = $this->resourceConnection->getTableName(self::DROP_COUNTER_TABLE);
 

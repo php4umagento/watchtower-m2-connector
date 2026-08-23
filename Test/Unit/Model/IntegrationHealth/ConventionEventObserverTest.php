@@ -15,6 +15,8 @@ use Magento\Store\Api\Data\StoreInterface;
 use Magento\Store\Model\Store;
 use Magento\Store\Model\StoreManagerInterface;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\IntegrationHealth\ConventionEventObserver;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthEventRepository;
 
@@ -37,7 +39,12 @@ class ConventionEventObserverTest extends TestCase
         $storeManager = $this->createMock(StoreManagerInterface::class);
         $storeManager->expects(self::never())->method('getStore');
 
-        (new ConventionEventObserver($repository, $storeManager))->execute(
+        (new ConventionEventObserver(
+            $repository,
+            $storeManager,
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        ))->execute(
             $this->observerWith(['status' => 'ok', 'integration' => 'erp_sync', 'store_id' => 5])
         );
     }
@@ -54,7 +61,12 @@ class ConventionEventObserverTest extends TestCase
         $storeManager = $this->createStub(StoreManagerInterface::class);
         $storeManager->method('getStore')->willReturn($store);
 
-        (new ConventionEventObserver($repository, $storeManager))->execute(
+        (new ConventionEventObserver(
+            $repository,
+            $storeManager,
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        ))->execute(
             $this->observerWith(['status' => 'failed', 'integration' => 'erp_sync'])
         );
     }
@@ -67,7 +79,12 @@ class ConventionEventObserverTest extends TestCase
         $storeManager = $this->createStub(StoreManagerInterface::class);
         $storeManager->method('getStore')->willThrowException(new NoSuchEntityException());
 
-        (new ConventionEventObserver($repository, $storeManager))->execute(
+        (new ConventionEventObserver(
+            $repository,
+            $storeManager,
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        ))->execute(
             $this->observerWith(['status' => 'ok', 'integration' => 'erp_sync'])
         );
     }
@@ -80,7 +97,12 @@ class ConventionEventObserverTest extends TestCase
         $storeManager = $this->createMock(StoreManagerInterface::class);
         $storeManager->expects(self::never())->method('getStore');
 
-        (new ConventionEventObserver($repository, $storeManager))->execute(
+        (new ConventionEventObserver(
+            $repository,
+            $storeManager,
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        ))->execute(
             $this->observerWith(['status' => 'ok', 'integration' => 'erp_sync', 'store_id' => Store::DEFAULT_STORE_ID])
         );
     }
@@ -92,7 +114,12 @@ class ConventionEventObserverTest extends TestCase
 
         $storeManager = $this->createStub(StoreManagerInterface::class);
 
-        (new ConventionEventObserver($repository, $storeManager))->execute(
+        (new ConventionEventObserver(
+            $repository,
+            $storeManager,
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        ))->execute(
             $this->observerWith(['status' => 'ok'])
         );
     }
@@ -112,7 +139,12 @@ class ConventionEventObserverTest extends TestCase
 
         $storeManager = $this->createStub(StoreManagerInterface::class);
 
-        (new ConventionEventObserver($repository, $storeManager))->execute(
+        (new ConventionEventObserver(
+            $repository,
+            $storeManager,
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        ))->execute(
             $this->observerWith(['status' => 'success', 'integration' => 'erp_sync'])
         );
     }
@@ -131,7 +163,12 @@ class ConventionEventObserverTest extends TestCase
 
         $storeManager = $this->createStub(StoreManagerInterface::class);
 
-        (new ConventionEventObserver($repository, $storeManager))->execute(
+        (new ConventionEventObserver(
+            $repository,
+            $storeManager,
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        ))->execute(
             $this->observerWith(['status' => 'ok', 'integration' => str_repeat('a', 65)])
         );
     }
@@ -142,5 +179,17 @@ class ConventionEventObserverTest extends TestCase
     private function observerWith(array $eventData): Observer
     {
         return new Observer(['event' => new Event($eventData)]);
+    }
+
+    /**
+     * Every observer this module ships returns early when the merchant has
+     * switched it off; these cases all exercise the enabled path.
+     */
+    private function enabledConfig(): Config
+    {
+        $config = $this->createStub(Config::class);
+        $config->method('isEnabled')->willReturn(true);
+
+        return $config;
     }
 }

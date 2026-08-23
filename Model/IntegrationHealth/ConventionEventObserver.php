@@ -11,8 +11,10 @@ namespace Watchtower\Connector\Model\IntegrationHealth;
 use Magento\Framework\Event\Observer;
 use Magento\Framework\Event\ObserverInterface;
 use Magento\Framework\Exception\NoSuchEntityException;
+use Psr\Log\LoggerInterface;
 use Magento\Store\Model\Store;
 use Magento\Store\Model\StoreManagerInterface;
+use Watchtower\Connector\Model\Config;
 
 /**
  * Records each dispatch of the watchtower_integration_health convention event
@@ -37,21 +39,50 @@ class ConventionEventObserver implements ObserverInterface
     /**
      * @param IntegrationHealthEventRepository $repository
      * @param StoreManagerInterface $storeManager
+     * @param Config $config
+     * @param LoggerInterface $logger
      */
     public function __construct(
         private readonly IntegrationHealthEventRepository $repository,
-        private readonly StoreManagerInterface $storeManager
+        private readonly StoreManagerInterface $storeManager,
+        private readonly Config $config,
+        private readonly LoggerInterface $logger
     ) {
     }
 
     /**
      * Records one dispatched watchtower_integration_health event.
      *
+     * Gated and wrapped like every observer this module ships: a merchant who
+     * disabled the module expects it to stop writing, and the event manager
+     * offers no try/catch, so an uncaught throw here would break the very
+     * integration this signal exists to watch. ObserverSafetyTest enforces
+     * both statically.
+     *
      * @param Observer $observer
      * @return void
      */
     public function execute(Observer $observer): void
     {
+        try {
+            $this->record($observer);
+        } catch (\Throwable $e) {
+            $this->logger->critical($e);
+        }
+    }
+
+    /**
+     * Validates and records one dispatch, wrapped by execute() above.
+     *
+     * @param Observer $observer
+     * @return void
+     */
+    private function record(Observer $observer): void
+    {
+        if (!$this->config->isEnabled()) {
+            return;
+        }
+
         $event = $observer->getEvent();
         $status = (string) $event->getData('status');
         $integrationLabel = (string) $event->getData('integration');

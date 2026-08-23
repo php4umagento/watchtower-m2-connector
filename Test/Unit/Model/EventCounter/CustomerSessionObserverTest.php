@@ -15,6 +15,8 @@ use Magento\Store\Api\Data\StoreInterface;
 use Magento\Store\Model\Store;
 use Magento\Store\Model\StoreManagerInterface;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\EventCounter\CustomerSessionObserver;
 use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
 
@@ -35,7 +37,12 @@ class CustomerSessionObserverTest extends TestCase
             ->with(1, 'customer_login', self::isInstanceOf(\DateTimeImmutable::class));
         $repository->expects(self::never())->method('incrementDropped');
 
-        $observer = new CustomerSessionObserver($repository, $this->storeManagerResolvingTo(1));
+        $observer = new CustomerSessionObserver(
+            $repository,
+            $this->storeManagerResolvingTo(1),
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        );
 
         $observer->execute($this->observerFor('customer_login'));
     }
@@ -48,7 +55,12 @@ class CustomerSessionObserverTest extends TestCase
             ->with(7, 'customer_logout', self::isInstanceOf(\DateTimeImmutable::class));
         $repository->expects(self::never())->method('incrementDropped');
 
-        $observer = new CustomerSessionObserver($repository, $this->storeManagerResolvingTo(7));
+        $observer = new CustomerSessionObserver(
+            $repository,
+            $this->storeManagerResolvingTo(7),
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        );
 
         $observer->execute($this->observerFor('customer_logout'));
     }
@@ -61,7 +73,12 @@ class CustomerSessionObserverTest extends TestCase
             ->method('incrementDropped')
             ->with('customer_login', self::isInstanceOf(\DateTimeImmutable::class));
 
-        $observer = new CustomerSessionObserver($repository, $this->storeManagerResolvingTo(Store::DEFAULT_STORE_ID));
+        $observer = new CustomerSessionObserver(
+            $repository,
+            $this->storeManagerResolvingTo(Store::DEFAULT_STORE_ID),
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        );
 
         $observer->execute($this->observerFor('customer_login'));
     }
@@ -77,7 +94,12 @@ class CustomerSessionObserverTest extends TestCase
         $storeManager = $this->createStub(StoreManagerInterface::class);
         $storeManager->method('getStore')->willThrowException(new NoSuchEntityException(__('No such store.')));
 
-        $observer = new CustomerSessionObserver($repository, $storeManager);
+        $observer = new CustomerSessionObserver(
+            $repository,
+            $storeManager,
+            $this->enabledConfig(),
+            $this->createStub(LoggerInterface::class)
+        );
 
         $observer->execute($this->observerFor('customer_logout'));
     }
@@ -96,5 +118,17 @@ class CustomerSessionObserverTest extends TestCase
     private function observerFor(string $eventName): Observer
     {
         return new Observer(['event' => new Event(['name' => $eventName])]);
+    }
+
+    /**
+     * Every observer this module ships returns early when the merchant has
+     * switched it off; these cases all exercise the enabled path.
+     */
+    private function enabledConfig(): Config
+    {
+        $config = $this->createStub(Config::class);
+        $config->method('isEnabled')->willReturn(true);
+
+        return $config;
     }
 }

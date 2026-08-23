@@ -148,8 +148,8 @@
            comment="Per store view event-bus counters, e.g. customer_login and customer_logout.">
         <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
                 comment="Magento store view id"/>
-        <column xsi:type="varchar" name="event_name" nullable="false" length="32"
-                comment="Dispatched event name, e.g. customer_login"/>
+        <column xsi:type="varchar" name="event_name" nullable="false" length="64"
+                comment="Dispatched event name, e.g. sales_model_service_quote_submit_failure"/>
         <column xsi:type="datetime" name="hour_bucket" nullable="false"
                 comment="UTC top-of-hour instant this row counts"/>
         <column xsi:type="int" name="count" unsigned="true" nullable="false" default="0"
@@ -210,8 +210,8 @@
     </table>
     <table name="watchtower_event_drop_counter" resource="default" engine="innodb"
            comment="Local diagnostic count of events with no resolvable store, never transmitted.">
-        <column xsi:type="varchar" name="event_name" nullable="false" length="32"
-                comment="Dispatched event name, e.g. customer_login"/>
+        <column xsi:type="varchar" name="event_name" nullable="false" length="64"
+                comment="Dispatched event name, e.g. sales_model_service_quote_submit_failure"/>
         <column xsi:type="datetime" name="hour_bucket" nullable="false"
                 comment="UTC top-of-hour instant this row counts"/>
         <column xsi:type="int" name="count" unsigned="true" nullable="false" default="0"
