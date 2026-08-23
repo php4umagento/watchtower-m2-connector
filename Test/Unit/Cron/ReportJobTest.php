@@ -52,6 +52,43 @@ class ReportJobTest extends TestCase
         (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
     }
 
+    /**
+     * The two cadences are deliberately decoupled: cron_schedule drops a
+     * succeeded row roughly an hour after it finishes, so evidence has to be
+     * captured on every 5-minute tick even though the evaluate-and-submit
+     * cycle stays hourly. A snapshot that only ran when the cycle was due
+     * would reintegrate the exact miss it exists to prevent.
+     */
+    public function testSnapshotsIntegrationHealthEvidenceEvenOnATickThatIsNotDue(): void
+    {
+        $now = new \DateTimeImmutable('2026-08-13 14:05:00');
+
+        $reportingService = $this->createMock(ReportingService::class);
+        $reportingService->expects(self::once())->method('snapshotIntegrationHealthEvidence')->with($now);
+        $reportingService->expects(self::never())->method('run');
+
+        $repository = $this->createMock(ReportCycleStateRepository::class);
+        $repository->method('get')->willReturn(new ReportCycleState(
+            lastRunAt: new \DateTimeImmutable('2026-08-13 14:00:00')
+        ));
+        $repository->expects(self::never())->method('save');
+
+        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+    }
+
+    public function testSnapshotsIntegrationHealthEvidenceOnADueTickToo(): void
+    {
+        $now = new \DateTimeImmutable('2026-08-13 15:00:00');
+
+        $reportingService = $this->createMock(ReportingService::class);
+        $reportingService->expects(self::once())->method('snapshotIntegrationHealthEvidence')->with($now);
+        $reportingService->method('run')->willReturn(['ran' => false]);
+
+        $repository = $this->repositoryReturning(lastRunAt: new \DateTimeImmutable('2026-08-13 14:00:00'));
+
+        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+    }
+
     public function testRunsOnceExactlyAnHourHasPassedSinceTheLastRun(): void
     {
         $reportingService = $this->createMock(ReportingService::class);

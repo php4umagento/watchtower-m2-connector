@@ -109,6 +109,37 @@ class IntegrationHealthStateRepository
     }
 
     /**
+     * Updates only the observed-evidence columns for a store view.
+     *
+     * The evidence snapshot runs far more often than the evaluation cycle
+     * (see ReportingService::snapshotIntegrationHealthEvidence), so it must
+     * leave the debounce status, sequence number, and source fingerprint
+     * entirely to the evaluator.
+     *
+     * @param int $storeViewId
+     * @param \DateTimeImmutable|null $lastSuccessAt
+     * @param \DateTimeImmutable|null $lastFailureAt
+     * @return void
+     */
+    public function saveObservedEvidence(
+        int $storeViewId,
+        ?\DateTimeImmutable $lastSuccessAt,
+        ?\DateTimeImmutable $lastFailureAt
+    ): void {
+        $connection = $this->resourceConnection->getConnection();
+        $table = $this->resourceConnection->getTableName(self::TABLE);
+
+        $connection->update(
+            $table,
+            [
+                'last_success_at' => $lastSuccessAt?->format('Y-m-d H:i:s'),
+                'last_failure_at' => $lastFailureAt?->format('Y-m-d H:i:s'),
+            ],
+            ['store_view_id = ?' => $storeViewId]
+        );
+    }
+
+    /**
      * Converts a nullable stored datetime string to a DateTimeImmutable.
      *
      * Explicit UTC, not the bare single-arg form: stored datetimes are

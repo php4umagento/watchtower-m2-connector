@@ -22,6 +22,7 @@ use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfig;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\Observation;
 use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
@@ -79,6 +80,8 @@ class ReportingService
      *     diagnostics page/CLI can read it back without re-seeding
      * @param IntegrationHealthConfigRepository $integrationHealthConfigRepository
      * @param IntegrationHealthEvaluator $integrationHealthEvaluator
+     * @param IntegrationHealthStateRepository $integrationHealthStateRepository used only by the evidence
+     *     snapshot; the evaluator owns every other write to that table
      * @param CronJobObserver $cronJobObserver
      * @param QueueConsumerObserver $queueConsumerObserver
      * @param ConventionEventReader $conventionEventReader
@@ -103,6 +106,7 @@ class ReportingService
         private readonly SeedCoverageRepository $seedCoverageRepository,
         private readonly IntegrationHealthConfigRepository $integrationHealthConfigRepository,
         private readonly IntegrationHealthEvaluator $integrationHealthEvaluator,
+        private readonly IntegrationHealthStateRepository $integrationHealthStateRepository,
         private readonly CronJobObserver $cronJobObserver,
         private readonly QueueConsumerObserver $queueConsumerObserver,
         private readonly ConventionEventReader $conventionEventReader,
@@ -279,6 +283,71 @@ class ReportingService
             'organizationPaused' => false,
             'belowMinimumVersion' => false,
         ];
+    }
+
+    /**
+     * Captures integration_health success/failure evidence without evaluating anything.
+     *
+     * Magento purges succeeded cron_schedule rows about an hour after they
+     * finish, so a source observed only once per evaluation cycle can have its
+     * single daily success vanish between two ticks and be reported DOWN while
+     * perfectly healthy. Cron\ReportJob therefore calls this every 5-minute
+     * tick; it writes only the two evidence columns and never produces a
+     * report, advances a sequence number, or touches a status.
+     *
+     * @param \DateTimeImmutable $now
+     * @return void
+     */
+    public function snapshotIntegrationHealthEvidence(\DateTimeImmutable $now): void
+    {
+        if (!$this->config->isConfigured() || !$this->config->isEnabled()) {
+            return;
+        }
+
+        foreach ($this->liveStoreViewResolver->all() as $store) {
+            $storeViewId = (int) $store->getId();
+            $config = $this->integrationHealthConfigRepository->get($storeViewId);
+
+            if ($config === null) {
+                continue;
+            }
+
+            $state = $this->integrationHealthStateRepository->get($storeViewId);
+
+            // A source change must be re-seeded by the evaluator, not have fresh
+            // evidence written under the previous source's fingerprint.
+            if (!$state->describesSource($config->sourceType, $config->sourceIdentifier)) {
+                continue;
+            }
+
+            $observation = $this->observeConfiguredSource($config, $now);
+
+            if ($observation === null) {
+                continue;
+            }
+
+            $this->integrationHealthStateRepository->saveObservedEvidence(
+                $storeViewId,
+                $this->later($observation->latestSuccessAt, $state->lastSuccessAt),
+                $this->later($observation->latestFailureAt, $state->lastFailureAt)
+            );
+        }
+    }
+
+    /**
+     * The later of two nullable timestamps, so persisted evidence only ever moves forward.
+     *
+     * @param \DateTimeImmutable|null $observed
+     * @param \DateTimeImmutable|null $stored
+     * @return \DateTimeImmutable|null
+     */
+    private function later(?\DateTimeImmutable $observed, ?\DateTimeImmutable $stored): ?\DateTimeImmutable
+    {
+        if ($observed === null || $stored === null) {
+            return $observed ?? $stored;
+        }
+
+        return $observed > $stored ? $observed : $stored;
     }
 
     /**

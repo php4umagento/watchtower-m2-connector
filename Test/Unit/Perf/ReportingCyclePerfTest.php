@@ -31,6 +31,7 @@ use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
 use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
@@ -276,6 +277,7 @@ class ReportingCyclePerfTest extends TestCase
             $this->createStub(SeedCoverageRepository::class),
             $integrationHealthConfigRepository ?? $this->stubIntegrationHealthConfigRepository(),
             $integrationHealthEvaluator,
+            $this->createStub(IntegrationHealthStateRepository::class),
             $this->createStub(CronJobObserver::class),
             $this->createStub(QueueConsumerObserver::class),
             $this->createStub(ConventionEventReader::class),

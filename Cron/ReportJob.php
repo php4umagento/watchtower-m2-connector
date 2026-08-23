@@ -19,7 +19,9 @@ use Watchtower\Connector\Model\ReportingService;
  * etc/crontab.xml polls this every 5 minutes, but the real evaluate-and-submit
  * cycle -- expensive: it evaluates every live store view's rate signals, not
  * just a network call -- only actually runs roughly once an hour, gated by
- * isDue() below rather than every tick.
+ * isDue() below rather than every tick. The integration_health evidence
+ * snapshot is the one exception: it runs on every tick, because the source
+ * tables it reads do not retain their evidence for a full hour.
  *
  * Previously gated on a per-install "jitter minute" derived from the API key
  * hash, comparing against a tolerance window (see git history). That still
@@ -74,6 +76,11 @@ class ReportJob
      */
     public function executeAt(\DateTimeImmutable $now): void
     {
+        // Every tick, not just a due one: Magento purges succeeded cron_schedule
+        // rows about an hour after they finish, so evidence observed only once
+        // per hourly cycle can be missed entirely. Capture-only, never a report.
+        $this->reportingService->snapshotIntegrationHealthEvidence($now);
+
         if (!$this->isDue($now)) {
             return;
         }

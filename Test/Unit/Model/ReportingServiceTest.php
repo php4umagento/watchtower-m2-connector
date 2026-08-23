@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace Watchtower\Connector\Test\Unit\Model;
 
 use Magento\Store\Model\StoreManagerInterface;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Watchtower\Connector\Model\Api\ConnectorVersionCheckResult;
@@ -30,6 +31,8 @@ use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfig;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthState;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\Observation;
 use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
@@ -65,6 +68,9 @@ use Watchtower\Connector\Test\Unit\StoreStubTrait;
 class ReportingServiceTest extends TestCase
 {
     use StoreStubTrait;
+
+    /** The configured integration_health source the evidence-snapshot tests share. */
+    private const SNAPSHOT_JOB_CODE = 'partner_feed_export';
 
     public function testNotConfiguredSkipsWithoutEvaluatingOrTouchingTheBuffer(): void
     {
@@ -1452,6 +1458,240 @@ class ReportingServiceTest extends TestCase
     }
 
     /**
+     * The reason the snapshot exists at all: Magento drops a succeeded
+     * cron_schedule row roughly an hour after it finishes, so a success seen
+     * on a 5-minute tick has to be persisted then, not an hour later when the
+     * evaluation cycle next runs and the row is already gone.
+     */
+    public function testTheEvidenceSnapshotPersistsANewlyObservedSuccess(): void
+    {
+        $observedSuccessAt = new \DateTimeImmutable('2026-08-13T14:30:00+00:00');
+
+        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
+        $stateRepository->method('get')->willReturn($this->integrationHealthState(
+            lastSuccessAt: new \DateTimeImmutable('2026-08-12T14:30:00+00:00'),
+            lastFailureAt: null,
+        ));
+        $stateRepository->expects(self::once())
+            ->method('saveObservedEvidence')
+            ->with(1, $observedSuccessAt, null);
+
+        $this->snapshotService(
+            $stateRepository,
+            $this->cronJobObserverReturning($observedSuccessAt, null)
+        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
+    }
+
+    /**
+     * Evidence is a high-water mark, not a snapshot of the lookback window:
+     * an observation that is older than what is already stored (or missing
+     * entirely, once the source table has been pruned) must leave the stored
+     * value alone rather than ageing it back into a false DOWN.
+     */
+    public function testTheEvidenceSnapshotNeverMovesStoredEvidenceBackwards(): void
+    {
+        $storedSuccessAt = new \DateTimeImmutable('2026-08-13T14:30:00+00:00');
+        $storedFailureAt = new \DateTimeImmutable('2026-08-13T12:00:00+00:00');
+
+        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
+        $stateRepository->method('get')->willReturn($this->integrationHealthState(
+            lastSuccessAt: $storedSuccessAt,
+            lastFailureAt: $storedFailureAt,
+        ));
+        $stateRepository->expects(self::once())
+            ->method('saveObservedEvidence')
+            ->with(1, $storedSuccessAt, $storedFailureAt);
+
+        $this->snapshotService(
+            $stateRepository,
+            // Older success, and no failure at all this tick.
+            $this->cronJobObserverReturning(new \DateTimeImmutable('2026-08-13T09:00:00+00:00'), null)
+        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
+    }
+
+    /**
+     * A merchant who repointed the store view at a different source has state
+     * describing the old one. Re-seeding that is the evaluator's job, so the
+     * snapshot skips the store view rather than writing fresh evidence under
+     * a stale fingerprint.
+     */
+    public function testTheEvidenceSnapshotIsSkippedWhenTheStateDescribesADifferentSource(): void
+    {
+        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
+        $stateRepository->method('get')->willReturn($this->integrationHealthState(
+            lastSuccessAt: new \DateTimeImmutable('2026-08-13T14:30:00+00:00'),
+            lastFailureAt: null,
+            sourceIdentifier: 'a_job_the_merchant_has_since_replaced',
+        ));
+        $stateRepository->expects(self::never())->method('saveObservedEvidence');
+
+        $cronJobObserver = $this->createMock(CronJobObserver::class);
+        $cronJobObserver->expects(self::never())->method('observe');
+
+        $this->snapshotService($stateRepository, $cronJobObserver)
+            ->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
+    }
+
+    /**
+     * The snapshot is evidence capture only. Anything that would advance the
+     * debounce state machine (a full save(), an evaluation, a submission) runs
+     * 12x too often here and would both spam sequence numbers and confirm
+     * status changes on a cadence the ruleset was never designed around.
+     */
+    public function testTheEvidenceSnapshotWritesNoStatusOrSequenceNumberAndSubmitsNothing(): void
+    {
+        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
+        $stateRepository->method('get')->willReturn($this->integrationHealthState(
+            lastSuccessAt: null,
+            lastFailureAt: null,
+        ));
+        $stateRepository->expects(self::once())->method('saveObservedEvidence');
+        $stateRepository->expects(self::never())->method('save');
+
+        $integrationHealthEvaluator = $this->createMock(IntegrationHealthEvaluator::class);
+        $integrationHealthEvaluator->expects(self::never())->method('evaluate');
+        $integrationHealthEvaluator->expects(self::never())->method('heartbeatRetiredIfPreviouslyReported');
+
+        $submissionService = $this->createMock(MetricsSubmissionService::class);
+        $submissionService->expects(self::never())->method('submit');
+
+        $this->snapshotService(
+            $stateRepository,
+            $this->cronJobObserverReturning(new \DateTimeImmutable('2026-08-13T14:30:00+00:00'), null),
+            $integrationHealthEvaluator,
+            $submissionService
+        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
+    }
+
+    /**
+     * Same gate run() uses: an install that never set this up, or deliberately
+     * switched it off, must not have its tables read every 5 minutes.
+     *
+     * @param bool $isConfigured
+     * @param bool $isEnabled
+     * @return void
+     */
+    #[TestWith([false, true])]
+    #[TestWith([true, false])]
+    public function testTheEvidenceSnapshotDoesNothingWhenNotConfiguredOrDisabled(
+        bool $isConfigured,
+        bool $isEnabled
+    ): void {
+        $config = $this->createStub(Config::class);
+        $config->method('isConfigured')->willReturn($isConfigured);
+        $config->method('isEnabled')->willReturn($isEnabled);
+
+        $storeManager = $this->createMock(StoreManagerInterface::class);
+        $storeManager->expects(self::never())->method('getStores');
+
+        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
+        $stateRepository->expects(self::never())->method('get');
+        $stateRepository->expects(self::never())->method('saveObservedEvidence');
+
+        $this->service(
+            config: $config,
+            evaluator: $this->createStub(Evaluator::class),
+            storeManager: $storeManager,
+            integrationHealthStateRepository: $stateRepository,
+        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
+    }
+
+    /**
+     * A store view with no integration_health source configured must cost
+     * nothing beyond the config lookup itself, since this runs every tick.
+     */
+    public function testTheEvidenceSnapshotSkipsAStoreViewWithNoConfiguredSource(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
+        $stateRepository->expects(self::never())->method('get');
+        $stateRepository->expects(self::never())->method('saveObservedEvidence');
+
+        $cronJobObserver = $this->createMock(CronJobObserver::class);
+        $cronJobObserver->expects(self::never())->method('observe');
+
+        $this->service(
+            config: $this->configuredAndEnabled(),
+            evaluator: $this->createStub(Evaluator::class),
+            storeManager: $storeManager,
+            integrationHealthStateRepository: $stateRepository,
+            cronJobObserver: $cronJobObserver,
+        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
+    }
+
+    /**
+     * Builds a ReportingService with one live store view whose
+     * integration_health source is the cron job SNAPSHOT_JOB_CODE names.
+     *
+     * @param IntegrationHealthStateRepository $stateRepository
+     * @param CronJobObserver $cronJobObserver
+     * @param IntegrationHealthEvaluator|null $integrationHealthEvaluator
+     * @param MetricsSubmissionService|null $submissionService
+     * @return ReportingService
+     */
+    private function snapshotService(
+        IntegrationHealthStateRepository $stateRepository,
+        CronJobObserver $cronJobObserver,
+        ?IntegrationHealthEvaluator $integrationHealthEvaluator = null,
+        ?MetricsSubmissionService $submissionService = null
+    ): ReportingService {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
+        $integrationHealthConfigRepository->method('get')->willReturn(new IntegrationHealthConfig(
+            storeViewId: 1,
+            sourceType: IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB,
+            sourceIdentifier: self::SNAPSHOT_JOB_CODE,
+            expectedMaxIntervalMinutes: 1440,
+        ));
+
+        return $this->service(
+            config: $this->configuredAndEnabled(),
+            evaluator: $this->createStub(Evaluator::class),
+            submissionService: $submissionService,
+            storeManager: $storeManager,
+            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+            integrationHealthEvaluator: $integrationHealthEvaluator,
+            integrationHealthStateRepository: $stateRepository,
+            cronJobObserver: $cronJobObserver,
+        );
+    }
+
+    private function cronJobObserverReturning(
+        ?\DateTimeImmutable $latestSuccessAt,
+        ?\DateTimeImmutable $latestFailureAt
+    ): CronJobObserver {
+        $observer = $this->createStub(CronJobObserver::class);
+        $observer->method('observe')->willReturn(
+            new Observation(latestSuccessAt: $latestSuccessAt, latestFailureAt: $latestFailureAt)
+        );
+
+        return $observer;
+    }
+
+    private function integrationHealthState(
+        ?\DateTimeImmutable $lastSuccessAt,
+        ?\DateTimeImmutable $lastFailureAt,
+        string $sourceIdentifier = self::SNAPSHOT_JOB_CODE
+    ): IntegrationHealthState {
+        return new IntegrationHealthState(
+            storeViewId: 1,
+            lastSuccessAt: $lastSuccessAt,
+            lastFailureAt: $lastFailureAt,
+            pendingStatus: null,
+            confirmedStatus: SignalStatus::Normal,
+            sequenceNumber: 7,
+            lastReportedReason: ReportReason::Heartbeat,
+            sourceType: IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB,
+            sourceIdentifier: $sourceIdentifier,
+            observingSince: new \DateTimeImmutable('2026-08-01T00:00:00+00:00'),
+        );
+    }
+
+    /**
      * Shared body for the queue_consumer/convention_event dispatch tests
      * above: wires a single live store view with the given source_type/
      * identifier configured, asserts only the matching observer/reader is
@@ -1601,6 +1841,7 @@ class ReportingServiceTest extends TestCase
      * @param SeedCoverageRepository|null $seedCoverageRepository
      * @param IntegrationHealthConfigRepository|null $integrationHealthConfigRepository
      * @param IntegrationHealthEvaluator|null $integrationHealthEvaluator
+     * @param IntegrationHealthStateRepository|null $integrationHealthStateRepository
      * @param CronJobObserver|null $cronJobObserver
      * @param QueueConsumerObserver|null $queueConsumerObserver
      * @param ConventionEventReader|null $conventionEventReader
@@ -1625,6 +1866,7 @@ class ReportingServiceTest extends TestCase
         ?SeedCoverageRepository $seedCoverageRepository = null,
         ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
         ?IntegrationHealthEvaluator $integrationHealthEvaluator = null,
+        ?IntegrationHealthStateRepository $integrationHealthStateRepository = null,
         ?CronJobObserver $cronJobObserver = null,
         ?QueueConsumerObserver $queueConsumerObserver = null,
         ?ConventionEventReader $conventionEventReader = null,
@@ -1689,6 +1931,7 @@ class ReportingServiceTest extends TestCase
             $seedCoverageRepository,
             $integrationHealthConfigRepository,
             $integrationHealthEvaluator ?? $this->createStub(IntegrationHealthEvaluator::class),
+            $integrationHealthStateRepository ?? $this->createStub(IntegrationHealthStateRepository::class),
             $cronJobObserver ?? $this->createStub(CronJobObserver::class),
             $queueConsumerObserver ?? $this->createStub(QueueConsumerObserver::class),
             $conventionEventReader ?? $this->createStub(ConventionEventReader::class),
