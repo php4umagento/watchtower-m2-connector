@@ -5,6 +5,31 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.20.0] - 2026-08-23
+
+Adds `checkout_failure`, a new signal reporting the share of order
+placement attempts that failed. Magento's tables only record orders that
+succeeded, so a placement that throws leaves nothing to count and is
+invisible to every other signal until the drop in order volume becomes
+statistically obvious. This one needs no baseline and reaches a verdict in
+its first hour, including on low-volume stores where the drop-based
+detection cannot say anything at all.
+
+`customer_account` now actually reports the login and logout counts it has
+been collecting all along; they were being written and pruned but never
+read, so the category was silently reporting registrations only. As a
+consequence it is no longer seeded at install: two of its three
+sub-counters have no history to read, and seeding only the third would
+leave every live hour compared against a baseline missing its largest
+term. That category now warms up over its first baseline window instead,
+and says so in diagnostics. `checkout` and `basket_quote` still seed
+immediately.
+
+**Requires the Watchtower platform to be running metrics spec 2.7 or
+later.** An older platform rejects the whole submission, not just the new
+report, so upgrade the platform side first. Run `setup:upgrade`, it widens
+one column.
+
 ## [1.19.0] - 2026-08-23
 
 The integration health source picker now lists every cron job the store
