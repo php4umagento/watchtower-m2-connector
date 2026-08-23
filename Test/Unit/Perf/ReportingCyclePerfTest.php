@@ -34,6 +34,7 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigReposito
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
+use Watchtower\Connector\Model\AdminAuthFailure\Evaluator as AdminAuthFailureEvaluator;
 use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\ReportingService;
@@ -266,6 +267,7 @@ class ReportingCyclePerfTest extends TestCase
         return new ReportingService(
             $config,
             $cronHealthEvaluator,
+            $this->createStub(AdminAuthFailureEvaluator::class),
             $this->createStub(MetricsSubmissionService::class),
             $bufferRepository,
             new LiveStoreViewResolver($storeManager),

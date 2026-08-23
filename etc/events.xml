@@ -32,4 +32,18 @@
         <observer name="watchtower_checkout_failure_counter"
                   instance="Watchtower\Connector\Model\EventCounter\CheckoutFailureObserver"/>
     </event>
+    <!--
+        Global rather than etc/adminhtml, even though admin sign-in only
+        ever happens in the adminhtml area in practice: matches this
+        module's other observers rather than being a special case, and
+        costs nothing extra since this event is already low-frequency by
+        nature. Two dispatch sites in core, both sharing this event name and
+        payload shape, so one binding covers both: Backend\Model\Auth::login()
+        (password) and AdminAdobeIms\Model\Auth::login() (SSO, only present
+        when that feature is configured).
+    -->
+    <event name="backend_auth_user_login_failed">
+        <observer name="watchtower_admin_auth_failure_counter"
+                  instance="Watchtower\Connector\Model\AdminAuthFailure\AdminAuthFailureObserver"/>
+    </event>
 </config>

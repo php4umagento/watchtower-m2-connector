@@ -11,16 +11,19 @@ namespace Watchtower\Connector\Console\Command;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use Watchtower\Connector\Model\AdminAuthFailure\InstallEventCounterRepository;
 use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
 
 class EventCounterPruneCommand extends Command
 {
     /**
      * @param EventCounterRepository $eventCounterRepository
+     * @param InstallEventCounterRepository $installEventCounterRepository
      * @param string|null $name
      */
     public function __construct(
         private readonly EventCounterRepository $eventCounterRepository,
+        private readonly InstallEventCounterRepository $installEventCounterRepository,
         ?string $name = null
     ) {
         parent::__construct($name);
@@ -34,7 +37,7 @@ class EventCounterPruneCommand extends Command
     protected function configure(): void
     {
         $this->setName('watchtower:event-counter-prune')
-            ->setDescription('Prune watchtower_event_counter and watchtower_event_drop_counter rows past retention');
+            ->setDescription('Prune every raw event counter table past retention');
 
         parent::configure();
     }
@@ -52,10 +55,13 @@ class EventCounterPruneCommand extends Command
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $result = $this->eventCounterRepository->prune(new \DateTimeImmutable());
+        $now = new \DateTimeImmutable();
+        $result = $this->eventCounterRepository->prune($now);
+        $installRowsPruned = $this->installEventCounterRepository->prune($now);
 
         $output->writeln(sprintf('<info>Event counter rows pruned: %d</info>', $result->counterRowsPruned));
         $output->writeln(sprintf('Event drop counter rows pruned: %d', $result->dropCounterRowsPruned));
+        $output->writeln(sprintf('Install event counter rows pruned: %d', $installRowsPruned));
 
         return Command::SUCCESS;
     }

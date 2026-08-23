@@ -223,6 +223,34 @@
             <column name="hour_bucket"/>
         </constraint>
     </table>
+    <table name="watchtower_install_event_counter" resource="default" engine="innodb"
+           comment="Install-scoped hourly counts for events with no store view, e.g. admin_auth_failure.">
+        <!--
+            Same (event_name, hour_bucket) shape as watchtower_event_drop_counter,
+            deliberately a separate table rather than reusing it: that one is
+            explicitly documented and leak-reviewed as "never transmitted,
+            diagnostic only", covering events dropped because a store view
+            could not be resolved. This table's counts ARE the signal,
+            transmitted after evaluation, for events that never had a store to
+            begin with. backend_auth_user_login_failed is the first example:
+            the Magento admin is one per install, not one per store view.
+            Conflating the two tables would mean a future reader trusting the
+            drop counter's "never transmitted" guarantee has to go verify
+            that claim instead of relying on it.
+        -->
+        <column xsi:type="varchar" name="event_name" nullable="false" length="64"
+                comment="Dispatched event name, e.g. backend_auth_user_login_failed"/>
+        <column xsi:type="datetime" name="hour_bucket" nullable="false"
+                comment="UTC top-of-hour instant this row counts"/>
+        <column xsi:type="int" name="count" unsigned="true" nullable="false" default="0"
+                comment="Event count observed in this hour"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last written"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="event_name"/>
+            <column name="hour_bucket"/>
+        </constraint>
+    </table>
     <table name="watchtower_integration_health_config" resource="default" engine="innodb"
            comment="Per-store-view configured integration_health source (admin source picker).">
         <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"

@@ -13,6 +13,7 @@ use Watchtower\Connector\Model\Api\ConnectorVersionCheckService;
 use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
 use Watchtower\Connector\Model\Api\MetricsSubmissionService;
+use Watchtower\Connector\Model\AdminAuthFailure\Evaluator as AdminAuthFailureEvaluator;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
@@ -40,10 +41,18 @@ use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 
 /**
  * Shared "evaluate then submit" logic behind both watchtower:report and the
- * scheduled cron job. Evaluates cron_health (install-scoped) plus the three
- * rate-based categories and integration_health for every live store view,
- * then submits them together wherever possible. "Live" mirrors
+ * scheduled cron job. Evaluates cron_health and admin_auth_failure
+ * (install-scoped, no store view) plus the three rate-based categories,
+ * checkout_failure, and integration_health for every live store view, then
+ * submits them together wherever possible. "Live" mirrors
  * StoreViewSyncService's is_active filter.
+ *
+ * $freshReports is always [cronHealth, adminAuthFailure, ...storeViewReports].
+ * The two install-scoped reports are captured into their own variables
+ * rather than derived positionally from that array, precisely so a caller
+ * distinguishing "the install-scoped reports" from "the store-view-scoped
+ * reports" cannot silently break the moment a third install-scoped signal
+ * exists.
  *
  * The platform rejects a report whose sequence_number is at or below the
  * highest already accepted for that event type, so a submission may never
@@ -68,6 +77,7 @@ class ReportingService
     /**
      * @param Config $config
      * @param Evaluator $cronHealthEvaluator
+     * @param AdminAuthFailureEvaluator $adminAuthFailureEvaluator
      * @param MetricsSubmissionService $metricsSubmissionService
      * @param ReportBufferRepository $reportBufferRepository
      * @param LiveStoreViewResolver $liveStoreViewResolver
@@ -96,6 +106,7 @@ class ReportingService
     public function __construct(
         private readonly Config $config,
         private readonly Evaluator $cronHealthEvaluator,
+        private readonly AdminAuthFailureEvaluator $adminAuthFailureEvaluator,
         private readonly MetricsSubmissionService $metricsSubmissionService,
         private readonly ReportBufferRepository $reportBufferRepository,
         private readonly LiveStoreViewResolver $liveStoreViewResolver,
@@ -129,6 +140,7 @@ class ReportingService
      * @return array{
      *     ran: bool,
      *     report?: MetricReport,
+     *     installReports?: MetricReport[],
      *     storeViewReports?: MetricReport[],
      *     result?: ?MetricsSubmissionResult,
      *     includedBufferedCount?: int,
@@ -172,9 +184,17 @@ class ReportingService
 
         $belowMinimumVersion = $this->connectorVersionStateRepository->get()->belowMinimum;
 
-        // cron_health must stay at index 0; callers read $outcome['report'] from there.
-        $freshReports = [$this->cronHealthEvaluator->evaluate($now)];
-        array_push($freshReports, ...$this->liveStoreViewReports($now));
+        // cron_health must stay at index 0; callers read $outcome['report'] from
+        // there. admin_auth_failure sits at index 1, the second and only other
+        // install-scoped signal -- both are captured into their own variables
+        // rather than assembled positionally, because "storeViewReports is
+        // everything after the install-scoped ones" stopped being expressible
+        // as a single array_slice offset the moment a second one existed.
+        $cronHealthReport = $this->cronHealthEvaluator->evaluate($now);
+        $adminAuthFailureReport = $this->adminAuthFailureEvaluator->evaluate($this->lastCompleteHourStart($now), $now);
+        $storeViewReports = $this->liveStoreViewReports($now);
+
+        $freshReports = [$cronHealthReport, $adminAuthFailureReport, ...$storeViewReports];
 
         // Before anything is buffered or submitted: an expired report 422s the entire batch it rides in.
         $expiredCount = $this->reportBufferRepository->discardExpired($now);
@@ -198,7 +218,8 @@ class ReportingService
             return [
                 'ran' => true,
                 'report' => $freshReports[0],
-                'storeViewReports' => array_slice($freshReports, 1),
+                'installReports' => [$cronHealthReport, $adminAuthFailureReport],
+                'storeViewReports' => $storeViewReports,
                 'result' => null,
                 'includedBufferedCount' => 0,
                 'expiredBufferedCount' => $expiredCount,
@@ -278,7 +299,8 @@ class ReportingService
         return [
             'ran' => true,
             'report' => $freshReports[0],
-            'storeViewReports' => array_slice($freshReports, 1),
+            'installReports' => [$cronHealthReport, $adminAuthFailureReport],
+            'storeViewReports' => $storeViewReports,
             'result' => $lastResult,
             'includedBufferedCount' => $totalIncludedBuffered,
             'expiredBufferedCount' => $expiredCount,
@@ -371,6 +393,32 @@ class ReportingService
     }
 
     /**
+     * The last COMPLETE top-of-hour instant before $now, UTC.
+     *
+     * Shared by liveStoreViewReports() and run()'s admin_auth_failure
+     * evaluation: both read an hour-bucketed counter, and both would
+     * structurally under-count if handed the still-accumulating current hour
+     * instead. Extracted to one place after this exact defect was found and
+     * fixed once already for the rate/ratio signals (metrics spec's own
+     * changelog, "the evaluation example evaluated a partially-elapsed
+     * hour") -- a second, separately-computed copy for the next
+     * hour-bucketed signal is exactly how that class of bug comes back.
+     *
+     * @param \DateTimeImmutable $now
+     * @return \DateTimeImmutable
+     */
+    private function lastCompleteHourStart(\DateTimeImmutable $now): \DateTimeImmutable
+    {
+        $currentHourStart = \DateTimeImmutable::createFromFormat(
+            'Y-m-d H:i:s',
+            $now->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:00:00'),
+            new \DateTimeZone('UTC')
+        );
+
+        return $currentHourStart->modify('-1 hour');
+    }
+
+    /**
      * Evaluates basket_quote/checkout/customer_account for every live store view.
      *
      * The evaluated hour is always the last COMPLETE hour: comparing a
@@ -383,14 +431,9 @@ class ReportingService
      */
     private function liveStoreViewReports(\DateTimeImmutable $now): array
     {
-        $currentHourStart = \DateTimeImmutable::createFromFormat(
-            'Y-m-d H:i:s',
-            $now->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:00:00'),
-            new \DateTimeZone('UTC')
-        );
-        $evaluatedHourStart = $currentHourStart->modify('-1 hour');
+        $evaluatedHourStart = $this->lastCompleteHourStart($now);
         $windowStart = $evaluatedHourStart;
-        $windowEnd = $currentHourStart;
+        $windowEnd = $evaluatedHourStart->modify('+1 hour');
 
         $readersByCategory = [
             HistorySeeder::CATEGORY_BASKET_QUOTE => $this->basketQuoteReader,
