@@ -45,7 +45,7 @@ use Watchtower\Connector\Model\Seed\SeedCoverageResult;
 use Watchtower\Connector\Model\Seed\SeedCoverageStatus;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
-use Watchtower\Connector\Model\Signal\CustomerAccountRegistrationReader;
+use Watchtower\Connector\Model\Signal\CustomerAccountReader;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 use Watchtower\Connector\Test\Unit\StoreStubTrait;
 
@@ -714,7 +714,7 @@ class ReportingServiceTest extends TestCase
         $basketQuoteReader->method('countForWindow')->willReturn(3);
         $checkoutReader = $this->createStub(CheckoutReader::class);
         $checkoutReader->method('countForWindow')->willReturn(2);
-        $customerAccountReader = $this->createStub(CustomerAccountRegistrationReader::class);
+        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
         $customerAccountReader->method('countForWindow')->willReturn(1);
 
         $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
@@ -898,7 +898,7 @@ class ReportingServiceTest extends TestCase
         $checkoutReader->expects(self::once())->method('countForWindow')
             ->with(1, $expectedWindowStart, $expectedWindowEnd)->willReturn(2);
 
-        $customerAccountReader = $this->createMock(CustomerAccountRegistrationReader::class);
+        $customerAccountReader = $this->createMock(CustomerAccountReader::class);
         $customerAccountReader->expects(self::once())->method('countForWindow')
             ->with(1, $expectedWindowStart, $expectedWindowEnd)->willReturn(1);
 
@@ -1119,7 +1119,7 @@ class ReportingServiceTest extends TestCase
         $checkoutReader = $this->createStub(CheckoutReader::class);
         $checkoutReader->method('countForWindow')->willReturn(2);
 
-        $customerAccountReader = $this->createStub(CustomerAccountRegistrationReader::class);
+        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
         $customerAccountReader->method('countForWindow')->willReturn(1);
 
         $rollupRepository = $this->createStub(RollupRepository::class);
@@ -1201,7 +1201,7 @@ class ReportingServiceTest extends TestCase
         $basketQuoteReader->method('countForWindow')->willReturn(0);
         $checkoutReader = $this->createStub(CheckoutReader::class);
         $checkoutReader->method('countForWindow')->willReturn(0);
-        $customerAccountReader = $this->createStub(CustomerAccountRegistrationReader::class);
+        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
         $customerAccountReader->method('countForWindow')->willReturn(0);
 
         $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
@@ -1332,7 +1332,7 @@ class ReportingServiceTest extends TestCase
         $basketQuoteReader->method('countForWindow')->willReturn(0);
         $checkoutReader = $this->createStub(CheckoutReader::class);
         $checkoutReader->method('countForWindow')->willReturn(0);
-        $customerAccountReader = $this->createStub(CustomerAccountRegistrationReader::class);
+        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
         $customerAccountReader->method('countForWindow')->willReturn(0);
 
         $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
@@ -1404,7 +1404,7 @@ class ReportingServiceTest extends TestCase
         $basketQuoteReader->method('countForWindow')->willReturn(0);
         $checkoutReader = $this->createStub(CheckoutReader::class);
         $checkoutReader->method('countForWindow')->willReturn(0);
-        $customerAccountReader = $this->createStub(CustomerAccountRegistrationReader::class);
+        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
         $customerAccountReader->method('countForWindow')->willReturn(0);
 
         $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
@@ -1717,7 +1717,7 @@ class ReportingServiceTest extends TestCase
         $basketQuoteReader->method('countForWindow')->willReturn(0);
         $checkoutReader = $this->createStub(CheckoutReader::class);
         $checkoutReader->method('countForWindow')->willReturn(0);
-        $customerAccountReader = $this->createStub(CustomerAccountRegistrationReader::class);
+        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
         $customerAccountReader->method('countForWindow')->willReturn(0);
 
         $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
@@ -1834,7 +1834,7 @@ class ReportingServiceTest extends TestCase
      * @param StoreManagerInterface|null $storeManager
      * @param BasketQuoteReader|null $basketQuoteReader
      * @param CheckoutReader|null $checkoutReader
-     * @param CustomerAccountRegistrationReader|null $customerAccountReader
+     * @param CustomerAccountReader|null $customerAccountReader
      * @param RollupRepository|null $rollupRepository
      * @param DispersionEvaluator|null $dispersionEvaluator
      * @param HistorySeeder|null $historySeeder
@@ -1859,7 +1859,7 @@ class ReportingServiceTest extends TestCase
         ?StoreManagerInterface $storeManager = null,
         ?BasketQuoteReader $basketQuoteReader = null,
         ?CheckoutReader $checkoutReader = null,
-        ?CustomerAccountRegistrationReader $customerAccountReader = null,
+        ?CustomerAccountReader $customerAccountReader = null,
         ?RollupRepository $rollupRepository = null,
         ?DispersionEvaluator $dispersionEvaluator = null,
         ?HistorySeeder $historySeeder = null,
@@ -1924,7 +1924,7 @@ class ReportingServiceTest extends TestCase
             new LiveStoreViewResolver($storeManager),
             $basketQuoteReader ?? $this->createStub(BasketQuoteReader::class),
             $checkoutReader ?? $this->createStub(CheckoutReader::class),
-            $customerAccountReader ?? $this->createStub(CustomerAccountRegistrationReader::class),
+            $customerAccountReader ?? $this->createStub(CustomerAccountReader::class),
             $rollupRepository,
             $dispersionEvaluator ?? $this->createStub(DispersionEvaluator::class),
             $historySeeder,

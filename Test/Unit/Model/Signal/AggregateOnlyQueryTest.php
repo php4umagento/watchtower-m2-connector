@@ -24,6 +24,17 @@ use PHPUnit\Framework\TestCase;
  * database are never anything but the count expression -- a class of bug a
  * per-reader unit test would only catch if someone remembered to write it
  * again each time.
+ *
+ * Exactly two shapes are permitted, and the second is checked as strictly
+ * as the first:
+ *
+ * 1. A querying reader: exactly one ->from(), selecting only COUNT(*)
+ *    aliased 'count', fetched with fetchOne().
+ * 2. A composite reader that delegates entirely and issues no SQL of its
+ *    own (CustomerAccountReader summing registrations and event counters).
+ *    It must touch no database surface whatsoever -- no connection, no
+ *    fetch of any kind, no Zend_Db_Expr -- so "it's only a composite"
+ *    cannot become a hiding place for an unscanned query.
  */
 class AggregateOnlyQueryTest extends TestCase
 {
@@ -38,6 +49,19 @@ class AggregateOnlyQueryTest extends TestCase
         foreach ($readerFiles as $file) {
             $source = file_get_contents($file);
             $className = basename($file, '.php');
+
+            if (!str_contains($source, '->from(')) {
+                self::assertDoesNotMatchRegularExpression(
+                    '/\bgetConnection\b|\bfetchOne\b|\bfetchRow\b|\bfetchAll\b'
+                    . '|\bfetchCol\b|\bfetchPairs\b|Zend_Db_Expr/',
+                    $source,
+                    "$className builds no query, so it must be a pure composite that touches no "
+                    . 'database surface at all. Add a ->from() and satisfy the aggregate-only rules '
+                    . 'if it genuinely needs to read.'
+                );
+
+                continue;
+            }
 
             $countOnlyPattern = '/->from\(\s*\$table\s*,\s*\[\s*\'count\'\s*=>\s*new \\\\Zend_Db_Expr\('
                 . '\s*\'COUNT\(\*\)\'\s*\)\s*\]\s*\)/';

@@ -33,7 +33,7 @@ use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
 use Watchtower\Connector\Model\Seed\SeedCoverageResult;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
-use Watchtower\Connector\Model\Signal\CustomerAccountRegistrationReader;
+use Watchtower\Connector\Model\Signal\CustomerAccountReader;
 use Watchtower\Connector\Model\Signal\RateSignalReaderInterface;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 
@@ -72,7 +72,7 @@ class ReportingService
      * @param LiveStoreViewResolver $liveStoreViewResolver
      * @param BasketQuoteReader $basketQuoteReader
      * @param CheckoutReader $checkoutReader
-     * @param CustomerAccountRegistrationReader $customerAccountRegistrationReader
+     * @param CustomerAccountReader $customerAccountReader
      * @param RollupRepository $rollupRepository
      * @param DispersionEvaluator $dispersionEvaluator
      * @param HistorySeeder $historySeeder
@@ -99,7 +99,7 @@ class ReportingService
         private readonly LiveStoreViewResolver $liveStoreViewResolver,
         private readonly BasketQuoteReader $basketQuoteReader,
         private readonly CheckoutReader $checkoutReader,
-        private readonly CustomerAccountRegistrationReader $customerAccountRegistrationReader,
+        private readonly CustomerAccountReader $customerAccountReader,
         private readonly RollupRepository $rollupRepository,
         private readonly DispersionEvaluator $dispersionEvaluator,
         private readonly HistorySeeder $historySeeder,
@@ -392,7 +392,7 @@ class ReportingService
         $readersByCategory = [
             HistorySeeder::CATEGORY_BASKET_QUOTE => $this->basketQuoteReader,
             HistorySeeder::CATEGORY_CHECKOUT => $this->checkoutReader,
-            HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT => $this->customerAccountRegistrationReader,
+            HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT => $this->customerAccountReader,
         ];
 
         $reports = [];

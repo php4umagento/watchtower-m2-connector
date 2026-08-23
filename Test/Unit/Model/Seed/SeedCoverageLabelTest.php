@@ -92,6 +92,31 @@ class SeedCoverageLabelTest extends TestCase
         );
     }
 
+    /**
+     * Deliberately worded so it does not read as a fault the merchant can
+     * fix or wait out. "Warming up: 0 of 84 days" would invite "why is it
+     * stuck at zero"; customer_account will never have history to seed,
+     * because logins are counted as they happen.
+     */
+    public function testUnseedableSourceExplainsThereIsNoHistoryRatherThanReportingZeroDays(): void
+    {
+        $label = new SeedCoverageLabel();
+
+        $result = new SeedCoverageResult(
+            category: HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT,
+            requestedDays: 84,
+            daysSeeded: 0,
+            status: SeedCoverageStatus::Limited,
+            limitReason: SeedLimitReason::UnseedableSource,
+        );
+
+        self::assertSame(
+            'customer account activity is counted as it happens, '
+            . 'so there is no history to seed from; warming up',
+            $label->describe($result)
+        );
+    }
+
     public function testUnrecognizedCategoryFallsBackToTheRawCategoryString(): void
     {
         $label = new SeedCoverageLabel();

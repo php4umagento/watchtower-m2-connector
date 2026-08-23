@@ -48,6 +48,10 @@ class SeedCoverageLabel
                 $result->daysSeeded,
                 $result->requestedDays
             ),
+            SeedLimitReason::UnseedableSource => sprintf(
+                '%s activity is counted as it happens, so there is no history to seed from; warming up',
+                $label
+            ),
             // HistorySeeder never returns Limited without a reason; this
             // branch exists only so match() is exhaustive for phpstan.
             null => sprintf('%s history limited: %d of %d days', $label, $result->daysSeeded, $result->requestedDays),

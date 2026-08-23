@@ -41,7 +41,7 @@ use Watchtower\Connector\Model\Seed\HistorySeeder;
 use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
-use Watchtower\Connector\Model\Signal\CustomerAccountRegistrationReader;
+use Watchtower\Connector\Model\Signal\CustomerAccountReader;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 
 /**
@@ -82,7 +82,7 @@ class ReportingCyclePerfTest extends TestCase
         $checkoutReader->expects(self::exactly(self::STORE_VIEW_COUNT))
             ->method('countForWindow')->willReturn(0);
 
-        $customerAccountReader = $this->createMock(CustomerAccountRegistrationReader::class);
+        $customerAccountReader = $this->createMock(CustomerAccountReader::class);
         $customerAccountReader->expects(self::exactly(self::STORE_VIEW_COUNT))
             ->method('countForWindow')->willReturn(0);
 
@@ -218,7 +218,7 @@ class ReportingCyclePerfTest extends TestCase
         StoreManagerInterface $storeManager,
         ?BasketQuoteReader $basketQuoteReader = null,
         ?CheckoutReader $checkoutReader = null,
-        ?CustomerAccountRegistrationReader $customerAccountReader = null,
+        ?CustomerAccountReader $customerAccountReader = null,
         ?RollupRepository $rollupRepository = null,
         ?DispersionEvaluator $dispersionEvaluator = null,
         ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
@@ -305,9 +305,9 @@ class ReportingCyclePerfTest extends TestCase
         return $reader;
     }
 
-    private function stubCustomerAccountReader(): CustomerAccountRegistrationReader
+    private function stubCustomerAccountReader(): CustomerAccountReader
     {
-        $reader = $this->createStub(CustomerAccountRegistrationReader::class);
+        $reader = $this->createStub(CustomerAccountReader::class);
         $reader->method('countForWindow')->willReturn(0);
 
         return $reader;

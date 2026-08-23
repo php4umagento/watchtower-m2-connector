@@ -37,4 +37,22 @@ enum SeedLimitReason: string
      * deleted, there was simply never anything there.
      */
     case InsufficientHistory = 'insufficient_history';
+
+    /**
+     * The category counts at least one event-bus sub-counter, which by
+     * definition has no historical record to read -- customer_account's
+     * logins and logouts (see connector-signal-sourcing.md D4).
+     *
+     * Distinct from InsufficientHistory: that one says "there wasn't much
+     * there", this one says "there is nowhere to look". Nothing about the
+     * store or the passage of time will ever make it seedable.
+     *
+     * Such a category must not be partially seeded from its table-sourced
+     * sub-counters alone. Doing so builds a baseline out of a strict subset
+     * of what the live path reports, which is a structural inflation, not a
+     * small one: every live hour would be compared against a baseline
+     * missing its largest term, spiking permanently until the whole window
+     * rolls over.
+     */
+    case UnseedableSource = 'unseedable_source';
 }

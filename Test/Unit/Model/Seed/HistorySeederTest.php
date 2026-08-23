@@ -17,14 +17,14 @@ use Watchtower\Connector\Model\Seed\SeedCoverageStatus;
 use Watchtower\Connector\Model\Seed\SeedLimitReason;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
-use Watchtower\Connector\Model\Signal\CustomerAccountRegistrationReader;
 
 /**
  * The seed-bounding formula:
  * seed_window = min(baseline_window, delete_quote_after - safety_margin)
- * for basket_quote only; checkout and customer_account's registrations
- * sub-counter are bounded only by the baseline window and the row-count
- * ceiling. These tests lock the exact coverage result each case reports,
+ * for basket_quote only; checkout is bounded only by the baseline window
+ * and the row-count ceiling; customer_account is not seeded at all, because
+ * its login/logout terms have no history to read. These tests lock the
+ * exact coverage result each case reports,
  * since the CLI command formats that result verbatim into its output
  * ("cart history seeded: 26 days" / "cart history unavailable ... warming
  * up") and must be able to trust it.
@@ -100,25 +100,60 @@ class HistorySeederTest extends TestCase
         self::assertSame(1, $result->sourceRetentionDays);
     }
 
-    public function testCheckoutAndCustomerAccountWithAbundantHistoryAreNotTruncatedByAnyQuoteConstraint(): void
+    public function testCheckoutWithAbundantHistoryIsNotTruncatedByAnyQuoteConstraint(): void
     {
         // delete_quote_after is intentionally tiny here -- it must have zero
-        // effect on checkout/customer_account, only on basket_quote.
+        // effect on checkout, only on basket_quote.
         $seeder = $this->buildSeeder(
             deleteQuoteAfterDays: 1,
             basketQuoteCount: 0,
             checkoutCount: 100,
-            customerAccountCount: 100,
         );
 
         $results = $seeder->seed(self::STORE_VIEW_ID, $this->now(), 28);
+        $result = $results[HistorySeeder::CATEGORY_CHECKOUT];
 
-        foreach ([HistorySeeder::CATEGORY_CHECKOUT, HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT] as $category) {
-            self::assertSame(28, $results[$category]->requestedDays);
-            self::assertSame(28, $results[$category]->daysSeeded);
-            self::assertSame(SeedCoverageStatus::Seeded, $results[$category]->status);
-            self::assertNull($results[$category]->limitReason);
-        }
+        self::assertSame(28, $result->requestedDays);
+        self::assertSame(28, $result->daysSeeded);
+        self::assertSame(SeedCoverageStatus::Seeded, $result->status);
+        self::assertNull($result->limitReason);
+    }
+
+    /**
+     * customer_account reports registrations + logins + logouts, and the two
+     * event-sourced terms have no history to read. Seeding the registrations
+     * term alone would leave every live hour compared against a baseline
+     * missing its largest term -- a permanent spike, not a warm-up -- so the
+     * seeder must decline the whole category rather than partially fill it.
+     */
+    public function testCustomerAccountIsNeverSeededBecauseItsLoginTermsHaveNoHistory(): void
+    {
+        $seededCategories = [];
+        $rollupRepository = $this->createStub(RollupRepository::class);
+        $rollupRepository->method('recordHourlyCount')->willReturnCallback(
+            static function (int $storeViewId, string $category) use (&$seededCategories): void {
+                $seededCategories[$category] = true;
+            }
+        );
+
+        $seeder = $this->buildSeeder(
+            deleteQuoteAfterDays: 30,
+            basketQuoteCount: 0,
+            checkoutCount: 0,
+            rollupRepository: $rollupRepository,
+        );
+
+        $result = $seeder->seed(self::STORE_VIEW_ID, $this->now(), 28)[HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT];
+
+        self::assertArrayNotHasKey(
+            HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT,
+            $seededCategories,
+            'customer_account must contribute no rollup rows at all, not merely a short seed.'
+        );
+        self::assertSame(28, $result->requestedDays);
+        self::assertSame(0, $result->daysSeeded);
+        self::assertSame(SeedCoverageStatus::Limited, $result->status);
+        self::assertSame(SeedLimitReason::UnseedableSource, $result->limitReason);
     }
 
     public function testYoungStoreReportsHonestShorterCoverageInsteadOfClaimingTheFullBaselineWindow(): void
@@ -183,7 +218,6 @@ class HistorySeederTest extends TestCase
             deleteQuoteAfterDays: 30,
             basketQuoteCount: 0,
             checkoutCount: 7,
-            customerAccountCount: 0,
             rollupRepository: $rollupRepository,
         );
 
@@ -199,7 +233,6 @@ class HistorySeederTest extends TestCase
      * @param int $deleteQuoteAfterDays
      * @param int $basketQuoteCount
      * @param int|callable(\DateTimeImmutable): int $checkoutCount
-     * @param int $customerAccountCount
      * @param RollupRepository|null $rollupRepository
      * @return HistorySeeder
      */
@@ -207,7 +240,6 @@ class HistorySeederTest extends TestCase
         int $deleteQuoteAfterDays,
         int $basketQuoteCount = 0,
         int|callable $checkoutCount = 0,
-        int $customerAccountCount = 0,
         ?RollupRepository $rollupRepository = null,
     ): HistorySeeder {
         $basketQuoteReader = $this->createStub(BasketQuoteReader::class);
@@ -223,9 +255,6 @@ class HistorySeederTest extends TestCase
             $checkoutReader->method('countForWindow')->willReturn($checkoutCount);
         }
 
-        $customerAccountReader = $this->createStub(CustomerAccountRegistrationReader::class);
-        $customerAccountReader->method('countForWindow')->willReturn($customerAccountCount);
-
         $scopeConfig = $this->createStub(ScopeConfigInterface::class);
         $scopeConfig->method('getValue')->willReturnCallback(
             function (string $path, string $scopeType, $scopeCode) use ($deleteQuoteAfterDays) {
@@ -240,7 +269,6 @@ class HistorySeederTest extends TestCase
         return new HistorySeeder(
             $basketQuoteReader,
             $checkoutReader,
-            $customerAccountReader,
             $rollupRepository ?? $this->createStub(RollupRepository::class),
             $scopeConfig,
         );

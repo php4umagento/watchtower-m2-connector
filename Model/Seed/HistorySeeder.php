@@ -14,7 +14,6 @@ use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
 use Watchtower\Connector\Model\Signal\BasketQuoteReader;
 use Watchtower\Connector\Model\Signal\CheckoutReader;
-use Watchtower\Connector\Model\Signal\CustomerAccountRegistrationReader;
 use Watchtower\Connector\Model\Signal\RateSignalReaderInterface;
 
 /**
@@ -45,14 +44,12 @@ class HistorySeeder
     /**
      * @param BasketQuoteReader $basketQuoteReader
      * @param CheckoutReader $checkoutReader
-     * @param CustomerAccountRegistrationReader $customerAccountRegistrationReader
      * @param RollupRepository $rollupRepository
      * @param ScopeConfigInterface $scopeConfig
      */
     public function __construct(
         private readonly BasketQuoteReader $basketQuoteReader,
         private readonly CheckoutReader $checkoutReader,
-        private readonly CustomerAccountRegistrationReader $customerAccountRegistrationReader,
         private readonly RollupRepository $rollupRepository,
         private readonly ScopeConfigInterface $scopeConfig,
     ) {
@@ -99,12 +96,21 @@ class HistorySeeder
                 $now,
                 $baselineWindowDays
             ),
-            self::CATEGORY_CUSTOMER_ACCOUNT => $this->seedUnboundedCategory(
-                self::CATEGORY_CUSTOMER_ACCOUNT,
-                $this->customerAccountRegistrationReader,
-                $storeViewId,
-                $now,
-                $baselineWindowDays
+            // Deliberately not seeded, even though its registrations
+            // sub-counter is perfectly seedable on its own. The live path
+            // reports registrations + logins + logouts, and the latter two
+            // have no historical record (D4). Seeding registrations alone
+            // would compare every live hour against a baseline missing its
+            // largest term -- a permanent structural spike, not a warm-up.
+            // Seeding this category becomes possible only once the rollup
+            // can store sub-counters separately; its primary key is
+            // (store_view_id, category, hour_bucket) today.
+            self::CATEGORY_CUSTOMER_ACCOUNT => new SeedCoverageResult(
+                category: self::CATEGORY_CUSTOMER_ACCOUNT,
+                requestedDays: $baselineWindowDays,
+                daysSeeded: 0,
+                status: SeedCoverageStatus::Limited,
+                limitReason: SeedLimitReason::UnseedableSource,
             ),
         ];
     }
