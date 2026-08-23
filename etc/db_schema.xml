@@ -299,7 +299,7 @@
         <column xsi:type="varchar" name="connector_version" nullable="true" length="32"
                 comment="The installed version of this connector module, as of the last sync"/>
         <column xsi:type="boolean" name="magento_is_eol" nullable="true"
-                comment="Platform-supplied EOL determination for magento_version/magento_edition; null means undetermined"/>
+                comment="Platform-supplied EOL flag for this Magento version/edition; null means undetermined"/>
         <column xsi:type="date" name="magento_eol_date" nullable="true" comment="Platform-supplied EOL date"/>
         <column xsi:type="varchar" name="magento_status_label" nullable="true" length="32"
                 comment="Platform-supplied status label, e.g. supported"/>

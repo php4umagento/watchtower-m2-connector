@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © 2026 Watchtower. All rights reserved.
+ * Licensed under the Business Source License 1.1 (BUSL-1.1). See LICENSE.
+ */
+-->
+<ruleset name="Watchtower Connector">
+    <description>Magento2 coding standard plus this module's own justified exclusions.</description>
+
+    <arg name="colors"/>
+    <arg value="p"/>
+
+    <rule ref="Magento2">
+        <!--
+            Deprecated in the Magento2 standard itself, and merely including
+            it makes every run print "the Watchtower Connector standard uses
+            1 deprecated sniff". Excluded so a real warning is not buried in
+            standing noise.
+        -->
+        <exclude name="Magento2.Methods.DeprecatedModelMethod"/>
+
+        <!--
+            This module ships no CSS or LESS, only three adminhtml JS files.
+            The Magento2.Less sniffs still register for the CSS tokenizer,
+            which PHP_CodeSniffer 3.x reports as deprecated ahead of 4.0
+            dropping CSS support, printing six notices on every run before
+            any real finding. Excluding them costs nothing here and leaves
+            the JS sniffs in place.
+        -->
+        <exclude name="Magento2.Less"/>
+        <exclude name="Squiz.CSS"/>
+
+        <!--
+            Likewise for GraphQL: this module declares no schema, and these
+            sniffs register a custom tokenizer that 3.x flags as going away
+            in 4.0.
+        -->
+        <exclude name="Magento2.GraphQL"/>
+    </rule>
+
+    <!--
+        system.xml declares two frontend_model values that cannot be wrapped.
+        Magento's own system_file.xsd types that element as typeModel, whose
+        pattern is [A-Za-z0-9_\\:]+ , so any whitespace makes the file fail
+        XSD validation. The fully-qualified class names sit at Magento's
+        conventional Block\Adminhtml\System\Config path, and shortening the
+        namespace purely to satisfy a line-length rule would trade a real
+        convention for a cosmetic one.
+
+        Scoped to this one file rather than disabled globally, so genuinely
+        over-long lines anywhere else are still reported.
+    -->
+    <rule ref="Generic.Files.LineLength">
+        <exclude-pattern>*/etc/adminhtml/system.xml</exclude-pattern>
+    </rule>
+</ruleset>
