@@ -20,16 +20,13 @@ use Watchtower\Connector\Model\Api\SignalStatus;
  * merchant.
  *
  * WHY THIS EXISTS AS A CLASS. CronHealth\Evaluator, RateSignal\DispersionEvaluator
- * and IntegrationHealth\Evaluator each hold their own copy of this state
- * machine, and CronHealth\Evaluator's docblock has warned for some time that
- * "a bug fixed here probably exists in those copies too". CheckoutFailure
- * would have been the fourth copy. It uses this instead.
- *
- * The three older evaluators have NOT been migrated onto it: they are on a
- * live alerting path with heavy test coverage built around their current
- * shape, and moving them is a change worth making deliberately rather than as
- * a side effect of adding a signal. Until that happens the duplication warning
- * still stands, and this class is the destination when someone takes it on.
+ * and IntegrationHealth\Evaluator once each held their own copy of this state
+ * machine, and CronHealth\Evaluator's docblock warned that "a bug fixed here
+ * probably exists in those copies too". That is now a single copy: every
+ * evaluator that debounces -- CronHealth, RateSignal\DispersionEvaluator,
+ * IntegrationHealth, CheckoutFailure and AdminAuthFailure -- calls decide()
+ * here, so a fix like the first-evaluation seed below lands in one place for
+ * all of them.
  */
 class TwoEvaluationDebounce
 {
@@ -39,23 +36,46 @@ class TwoEvaluationDebounce
      * @param SignalStatus $rawStatus this tick's freshly computed status
      * @param SignalStatus|null $confirmedStatus last confirmed status; null means no evaluation has ever run
      * @param SignalStatus|null $pendingStatus status awaiting a second consecutive confirmation
+     * @param bool $warmsUp whether this signal needs a baseline before its verdict is trustworthy;
+     *     true (the default) for rate/ratio signals, false for threshold/state signals whose raw
+     *     status is meaningful from the very first tick
      * @return DebounceDecision
      */
     public function decide(
         SignalStatus $rawStatus,
         ?SignalStatus $confirmedStatus,
-        ?SignalStatus $pendingStatus
+        ?SignalStatus $pendingStatus,
+        bool $warmsUp = true
     ): DebounceDecision {
-        // First evaluation: nothing to debounce against. Seeding
-        // INSUFFICIENT_DATA as the confirmed baseline stops the very first
-        // tick after activation from reporting a false anomaly.
+        // First evaluation: nothing to debounce against. How to seed depends on
+        // whether the signal warms up.
         if ($confirmedStatus === null) {
-            return new DebounceDecision(
-                SignalStatus::InsufficientData,
-                ReportReason::Transition,
-                null,
-                SignalStatus::InsufficientData
-            );
+            // A warm-up signal (rate/ratio, integration health) needs a
+            // baseline before any verdict can be trusted, so it seeds
+            // INSUFFICIENT_DATA regardless of this tick's raw status. That
+            // stops the very first tick after activation from reporting a false
+            // anomaly, and confirming NORMAL out of the seed later is treated as
+            // warm-up finishing, not a recovery (see confirmationReason()).
+            if ($warmsUp) {
+                return new DebounceDecision(
+                    SignalStatus::InsufficientData,
+                    ReportReason::Transition,
+                    null,
+                    SignalStatus::InsufficientData
+                );
+            }
+
+            // A non-warm-up signal (admin_auth_failure, cron_health) has a
+            // trustworthy reading immediately: zero failures is a real, healthy
+            // NORMAL, not "not enough data yet". Seeding INSUFFICIENT_DATA there
+            // would make it report a "Warming up" status its own rawStatus()
+            // never produces and its spec promises it never emits -- the
+            // production regression where admin_auth_failure paged "Warming up"
+            // its first hour on a fresh install. Treat NORMAL as the seeded
+            // baseline and fall through, so a healthy first hour reports NORMAL
+            // as a heartbeat, while a first-hour anomaly still needs a second
+            // consecutive tick to confirm rather than alerting on a single hour.
+            $confirmedStatus = SignalStatus::Normal;
         }
 
         // No change. Clear any stale pending status left by a raw blip that

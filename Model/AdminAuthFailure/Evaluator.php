@@ -101,7 +101,11 @@ class Evaluator
         );
 
         $rawStatus = $this->rawStatus($failureCount);
-        $decision = $this->debounce->decide($rawStatus, $state->confirmedStatus, $state->pendingStatus);
+        // warmsUp: false -- a fixed failure-count threshold needs no baseline,
+        // so this signal is live in its first hour and never reports a
+        // "Warming up" seed (see rawStatus(), which never returns
+        // INSUFFICIENT_DATA).
+        $decision = $this->debounce->decide($rawStatus, $state->confirmedStatus, $state->pendingStatus, warmsUp: false);
 
         $this->repository->save(new HealthState(
             eventType: self::EVENT_TYPE,

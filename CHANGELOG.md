@@ -5,6 +5,16 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.21.1] - Unreleased
+
+Fixes the two install-scoped signals, `admin_auth_failure` and `cron_health`,
+reporting a brief "Warming up" status in their first hour on a fresh install.
+Both read a fixed threshold or the scheduler's own record, so they have a
+trustworthy reading from the very first evaluation and never need to warm up.
+A healthy first hour now reports normal straight away instead. A problem
+present from the first hour still takes two consecutive evaluations to
+confirm before it alerts, exactly as before.
+
 ## [1.21.0] - 2026-08-23
 
 Adds `admin_auth_failure`, a new signal counting failed Magento admin

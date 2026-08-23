@@ -15,13 +15,20 @@ use Watchtower\Connector\Model\Debounce\TwoEvaluationDebounce;
 
 /**
  * The debounce state machine on its own, with no signal, no storage and no
- * clock. Three evaluators still carry their own copy of this logic; testing
- * the extracted one directly is what makes migrating them later a safe,
- * mechanical change rather than a rewrite.
+ * clock. Every evaluator now shares this one copy, so testing it directly is
+ * what proves the behaviour they all inherit -- most importantly what each
+ * one does on its very first evaluation.
  */
 class TwoEvaluationDebounceTest extends TestCase
 {
-    public function testTheFirstEvaluationSeedsInsufficientDataAsATransition(): void
+    /**
+     * A warm-up signal (the default: rate/ratio signals, integration health)
+     * needs a baseline before its verdict can be trusted, so its first
+     * evaluation seeds INSUFFICIENT_DATA regardless of the raw status -- even a
+     * raw anomaly is withheld until a baseline exists. Confirming out of the
+     * seed is handled by the warm-up tests further down.
+     */
+    public function testTheFirstEvaluationOfAWarmUpSignalSeedsInsufficientData(): void
     {
         $decision = (new TwoEvaluationDebounce())->decide(SignalStatus::SevereDrop, null, null);
 
@@ -29,6 +36,39 @@ class TwoEvaluationDebounceTest extends TestCase
         self::assertSame(ReportReason::Transition, $decision->reportReason);
         self::assertSame(SignalStatus::InsufficientData, $decision->nextConfirmedStatus);
         self::assertNull($decision->nextPendingStatus);
+    }
+
+    /**
+     * A non-warm-up signal (admin_auth_failure, cron_health) has a trustworthy
+     * reading immediately: a healthy first hour is a real NORMAL, not "Warming
+     * up". With warmsUp: false it must NOT seed INSUFFICIENT_DATA -- the
+     * production regression where admin_auth_failure paged "Warming up" its
+     * first hour on a fresh install.
+     */
+    public function testTheFirstEvaluationOfAHealthyNonWarmUpSignalSeedsNormalAsAHeartbeat(): void
+    {
+        $decision = (new TwoEvaluationDebounce())->decide(SignalStatus::Normal, null, null, warmsUp: false);
+
+        self::assertSame(SignalStatus::Normal, $decision->reportStatus);
+        self::assertSame(ReportReason::Heartbeat, $decision->reportReason);
+        self::assertSame(SignalStatus::Normal, $decision->nextConfirmedStatus);
+        self::assertNull($decision->nextPendingStatus);
+    }
+
+    /**
+     * The other half: an anomaly on a non-warm-up signal's first tick still
+     * must not page on a single hour. It arms the pending status against a
+     * NORMAL seed and reports NORMAL as a heartbeat, so a second consecutive
+     * anomalous tick is what confirms and alerts.
+     */
+    public function testTheFirstEvaluationOfAnAnomalousNonWarmUpSignalArmsPendingAgainstANormalSeed(): void
+    {
+        $decision = (new TwoEvaluationDebounce())->decide(SignalStatus::SevereDrop, null, null, warmsUp: false);
+
+        self::assertSame(SignalStatus::Normal, $decision->reportStatus);
+        self::assertSame(ReportReason::Heartbeat, $decision->reportReason);
+        self::assertSame(SignalStatus::SevereDrop, $decision->nextPendingStatus);
+        self::assertSame(SignalStatus::Normal, $decision->nextConfirmedStatus);
     }
 
     public function testAnUnchangedStatusIsAHeartbeat(): void

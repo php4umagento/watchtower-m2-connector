@@ -70,7 +70,11 @@ class Evaluator
         $lastFailureAt = $observation->latestFailureAt ?? $state->lastFailureAt;
         $rawStatus = $this->rawStatus($lastSuccessAt, $lastFailureAt, $now);
 
-        $decision = $this->debounce->decide($rawStatus, $state->confirmedStatus, $state->pendingStatus);
+        // warmsUp: false -- cron health reads the scheduler's own success/
+        // failure record, so a recent run is a real, healthy NORMAL from the
+        // first tick with no baseline to build. It never reports a "Warming up"
+        // seed (rawStatus() never returns INSUFFICIENT_DATA).
+        $decision = $this->debounce->decide($rawStatus, $state->confirmedStatus, $state->pendingStatus, warmsUp: false);
 
         $this->save(
             $lastSuccessAt,

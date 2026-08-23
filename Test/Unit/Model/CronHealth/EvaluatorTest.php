@@ -30,7 +30,15 @@ class EvaluatorTest extends TestCase
 {
     private const NOW_STRING = '2026-08-13T15:00:00+00:00';
 
-    public function testFirstEvaluationEverReportsInsufficientDataAsATransition(): void
+    /**
+     * cron_health's raw status is trustworthy from the first tick -- a recent
+     * cron run is a real, healthy NORMAL, not "not enough data yet". So the
+     * first evaluation ever of a healthy install reports NORMAL as a
+     * heartbeat, never INSUFFICIENT_DATA: the same warm-up-seed fix that
+     * stopped admin_auth_failure paging "Warming up" its first hour applies
+     * here, since both are threshold/state signals sharing one debounce.
+     */
+    public function testFirstEvaluationEverOfAHealthyInstallReportsNormalAsAHeartbeat(): void
     {
         $savedState = null;
         $repository = $this->createMock(HealthStateRepository::class);
@@ -44,15 +52,42 @@ class EvaluatorTest extends TestCase
 
         $report = (new Evaluator($observer, $repository))->evaluate($this->now());
 
-        self::assertSame(SignalStatus::InsufficientData, $report->status);
-        self::assertSame(ReportReason::Transition, $report->reason);
+        self::assertSame(SignalStatus::Normal, $report->status);
+        self::assertSame(ReportReason::Heartbeat, $report->reason);
         self::assertSame(1, $report->sequenceNumber);
         self::assertNull($report->storeViewCode);
         self::assertSame(Evaluator::EVENT_TYPE, $report->eventType);
 
-        self::assertSame(SignalStatus::InsufficientData, $savedState->confirmedStatus);
+        self::assertSame(SignalStatus::Normal, $savedState->confirmedStatus);
         self::assertNull($savedState->pendingStatus);
         self::assertSame(2, $savedState->sequenceNumber);
+    }
+
+    /**
+     * The other half: if cron is genuinely down on the very first evaluation
+     * (no success or failure evidence at all -> SevereDrop), it still must not
+     * page on a single hour. It arms the pending status against a NORMAL seed
+     * and heartbeats, so a second consecutive down tick is what confirms.
+     */
+    public function testFirstEvaluationEverOfADownInstallArmsPendingWithoutPaging(): void
+    {
+        $savedState = null;
+        $repository = $this->createMock(HealthStateRepository::class);
+        $repository->method('get')->willReturn($this->freshState());
+        $repository->expects(self::once())
+            ->method('save')
+            ->with(self::captureInto($savedState));
+
+        $observer = $this->createStub(CronScheduleObserver::class);
+        $observer->method('observe')->willReturn(new Observation(null, null));
+
+        $report = (new Evaluator($observer, $repository))->evaluate($this->now());
+
+        self::assertSame(SignalStatus::Normal, $report->status);
+        self::assertSame(ReportReason::Heartbeat, $report->reason);
+
+        self::assertSame(SignalStatus::Normal, $savedState->confirmedStatus);
+        self::assertSame(SignalStatus::SevereDrop, $savedState->pendingStatus);
     }
 
     public function testUnchangedStatusIsReportedAsAHeartbeatAndSequenceStillAdvances(): void

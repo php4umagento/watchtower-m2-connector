@@ -58,12 +58,37 @@ class EvaluatorTest extends TestCase
         self::assertNotSame(SignalStatus::InsufficientData, $report->status);
     }
 
-    public function testTheFirstEvaluationReportsInsufficientDataAsATransition(): void
+    /**
+     * The production regression: on a fresh install the first evaluation of a
+     * quiet hour must report NORMAL, never INSUFFICIENT_DATA. This signal's
+     * raw status is trustworthy from the first tick (zero failures is a real
+     * healthy reading), so it must not inherit the warm-up seed the ratio
+     * signals need -- Avalon Guns's owner was paged "Warming up" the first
+     * hour admin_auth_failure reported, which this pins shut.
+     */
+    public function testTheFirstEvaluationOfAQuietInstallIsNormalNotWarmingUp(): void
     {
-        $report = $this->evaluateWith(50, confirmed: null, pending: null);
+        $report = $this->evaluateWith(0, confirmed: null, pending: null);
 
-        self::assertSame(SignalStatus::InsufficientData, $report->status);
-        self::assertSame(ReportReason::Transition, $report->reason);
+        self::assertSame(SignalStatus::Normal, $report->status);
+        self::assertSame(ReportReason::Heartbeat, $report->reason);
+    }
+
+    /**
+     * The other half: a burst of failures in the very first evaluated hour
+     * still must not page on a single hour. It arms the pending status against
+     * the NORMAL seed and heartbeats, so a second consecutive bad hour is what
+     * confirms -- the same two-tick guarantee every later hour gets.
+     */
+    public function testTheFirstEvaluationWithFailuresArmsPendingWithoutPaging(): void
+    {
+        $saved = null;
+        $report = $this->evaluateWith(50, confirmed: null, pending: null, saved: $saved);
+
+        self::assertSame(SignalStatus::Normal, $report->status);
+        self::assertSame(ReportReason::Heartbeat, $report->reason);
+        self::assertSame(SignalStatus::SevereDrop, $saved->pendingStatus);
+        self::assertSame(SignalStatus::Normal, $saved->confirmedStatus);
     }
 
     public function testASingleBadHourDoesNotTransitionOnItsOwn(): void
