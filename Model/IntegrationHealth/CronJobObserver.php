@@ -15,8 +15,9 @@ use Magento\Framework\App\ResourceConnection;
  * Reads Magento's cron_schedule table for the freshest success/failure
  * evidence of a store-configured job code. Parameterized by whichever
  * job_code the store's source-picker configuration names, unlike
- * CronHealth\CronScheduleObserver, which watches this module's own fixed
- * watchtower_report job.
+ * CronHealth\CronScheduleObserver, which deliberately applies no job_code
+ * filter at all: cron_health is install-scoped and answers "is Magento cron
+ * running at all", so any job's success is evidence for it.
  *
  * Query shape (lookback window, COALESCE fallback for a 'missed' row's
  * missing finished_at) mirrors CronScheduleObserver's -- see that class's
