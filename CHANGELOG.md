@@ -5,7 +5,7 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
-## [1.21.1] - Unreleased
+## [1.21.1] - 2026-08-23
 
 Fixes the two install-scoped signals, `admin_auth_failure` and `cron_health`,
 reporting a brief "Warming up" status in their first hour on a fresh install.
