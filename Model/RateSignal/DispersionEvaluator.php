@@ -33,7 +33,7 @@ use Watchtower\Connector\Model\Seasonal\RetailCalendar;
 class DispersionEvaluator
 {
     /** Bumped whenever baseline logic or thresholds change, distinct from CronHealth\Evaluator's own version. */
-    public const RULESET_VERSION = '1.4.0';
+    public const RULESET_VERSION = '1.5.0';
 
     /**
      * Default rolling baseline window for Check A. Public because
@@ -92,8 +92,14 @@ class DispersionEvaluator
     /** Below this measured rate, rawStatus() uses the inter-arrival check instead of median/MAD. */
     private const VOLUME_FLOOR = 5;
 
-    /** Below this estimated daily volume, the inter-arrival check uses the quieter percentile. */
-    private const MIN_VIABLE_DAILY_VOLUME = 10;
+    /**
+     * Below this estimated daily volume the inter-arrival check uses the
+     * quieter percentile. Sits at the top of the simulated validated band
+     * (see MIN_VALIDATED_DAILY_VOLUME): a store in [MIN_VALIDATED, this) is
+     * only marginally validated, so it gets the extra-conservative 0.99
+     * percentile; a store at or above this is comfortably validated on 0.95.
+     */
+    private const MIN_VIABLE_DAILY_VOLUME = 30;
 
     /** Precision over recall below MIN_VIABLE_DAILY_VOLUME: a false "down" alert costs more than a slower true one. */
     private const LOW_VOLUME_PERCENTILE_QUIET = 0.99;
@@ -104,22 +110,25 @@ class DispersionEvaluator
     /**
      * Below this estimated daily volume, interArrivalRawStatus() reports
      * INSUFFICIENT_DATA for its silence check instead of a percentile
-     * verdict. docs/connector-baseline-seasonality.md §2.1's simulation
-     * only validated the inter-arrival approach down to 5 orders/day --
-     * "nobody had actually modeled whether the inter-arrival approach holds
-     * up" below it, and it doesn't: with only a handful of historical
-     * events total, the gap distribution's own maximum (a store that saw
-     * gaps of a few days at most) sits far below a genuine multi-week
-     * silence, so ANY percentile computed from it fires SEVERE_DROP on a
-     * store that simply never had meaningful volume to begin with -- not a
-     * real drop from a real baseline. Confirmed against a real install: a
-     * secondary store view with 4 total historical quotes reported
-     * SEVERE_DROP off a 3-sample gap distribution topping out at 63 hours,
-     * the moment its already-typical silence passed that ceiling. Distinct
+     * verdict. docs/connector-baseline-seasonality.md §2.1's simulation only
+     * validated the inter-arrival approach around 20-30+ orders/day and
+     * showed it degrading sharply below that: with only a handful of events
+     * per day, an ordinary quiet overnight stretch exceeds the store's own
+     * thin historical gap distribution and fires SEVERE_DROP -- not because
+     * anything broke, but because the baseline was never dense enough to tell
+     * quiet from stopped. An earlier 5/day floor let this through, confirmed
+     * in production on a real ~3-day-old low-volume install (avalonguns),
+     * whose basket_quote reported SEVERE_DROP on consecutive quiet nights
+     * while checkout stayed NORMAL and the other rate signals were themselves
+     * INSUFFICIENT_DATA. The floor is therefore set at the bottom of the
+     * validated band (20/day), trading recall for precision below it: a false
+     * "your sales stopped" page costs a low-traffic merchant more than a
+     * slightly slower true one, and checkout_failure/admin_auth_failure/
+     * cron_health (no baseline, live at any volume) still cover them. Distinct
      * from MIN_HISTORICAL_SAMPLES (a sample-count floor); this is a
      * volume-rate floor grounded in the spec's own simulated evidence.
      */
-    private const MIN_VALIDATED_DAILY_VOLUME = 5;
+    private const MIN_VALIDATED_DAILY_VOLUME = 20;
 
     /**
      * An hour with any events at all used to classify as trivially Normal in

@@ -5,6 +5,28 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.22.0] - 2026-08-24
+
+Raises the minimum store volume at which the rate-based signals (cart
+activity, checkout, and customer accounts) will report a drop. Below roughly
+20 orders a day these signals now report "Warming up" rather than a drop,
+because at that volume an ordinary quiet overnight stretch is statistically
+indistinguishable from a real stop, and the underlying detection method is
+only validated from about 20 to 30 orders a day upward.
+
+This removes a class of false "severe drop" alert that low-traffic stores
+could get overnight. It was confirmed in production: a quiet night on a
+genuinely low-volume store paged as a severe drop in cart activity while
+checkout and every other signal stayed normal. Higher-volume stores are
+unaffected.
+
+The failure signals (checkout failures, admin sign-in failures) and cron
+health need no baseline and keep working at any volume, so a low-traffic
+store is still protected against a genuinely broken checkout or a stopped
+cron.
+
+No schema change. Nothing to do beyond updating the module.
+
 ## [1.21.1] - 2026-08-23
 
 Fixes the two install-scoped signals, `admin_auth_failure` and `cron_health`,

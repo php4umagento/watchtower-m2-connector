@@ -776,7 +776,7 @@ class DispersionEvaluatorTest extends TestCase
         $report = $this->evaluateLowVolumeWithConfirmedStatus(
             currentGapHours: 9,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
-            anchorCount: 100, // high volume: >= MIN_VIABLE_DAILY_VOLUME, so the 0.95 default percentile applies.
+            anchorCount: 200, // ~35.7/day: >= MIN_VIABLE_DAILY_VOLUME (30), so the 0.95 default percentile applies.
             confirmed: SignalStatus::SevereDrop
         );
 
@@ -789,7 +789,7 @@ class DispersionEvaluatorTest extends TestCase
         $report = $this->evaluateLowVolumeWithConfirmedStatus(
             currentGapHours: 5,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
-            anchorCount: 100,
+            anchorCount: 200,
             confirmed: SignalStatus::Normal
         );
 
@@ -799,7 +799,7 @@ class DispersionEvaluatorTest extends TestCase
 
     /**
      * Same gap and same historical distribution as the SevereDrop test
-     * above, but a low estimated daily volume (anchorCount=40, ~7.1
+     * above, but a low estimated daily volume (anchorCount=140, ~25
      * orders/day: below MIN_VIABLE_DAILY_VOLUME but at/above
      * MIN_VALIDATED_DAILY_VOLUME, so the percentile check still runs) --
      * proving the threshold VALUE itself changed, not just coincidentally
@@ -810,7 +810,7 @@ class DispersionEvaluatorTest extends TestCase
         $report = $this->evaluateLowVolumeWithConfirmedStatus(
             currentGapHours: 9,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
-            anchorCount: 40, // ~7.1/day: < MIN_VIABLE_DAILY_VOLUME (10) but >= MIN_VALIDATED_DAILY_VOLUME (5).
+            anchorCount: 140, // ~25/day: < MIN_VIABLE_DAILY_VOLUME (30) but >= MIN_VALIDATED_DAILY_VOLUME (20).
             confirmed: SignalStatus::Normal
         );
 
@@ -834,10 +834,37 @@ class DispersionEvaluatorTest extends TestCase
         $report = $this->evaluateLowVolumeWithConfirmedStatus(
             currentGapHours: 9,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
-            anchorCount: 1, // ~0.18/day: below MIN_VALIDATED_DAILY_VOLUME (5).
+            anchorCount: 1, // ~0.18/day: below MIN_VALIDATED_DAILY_VOLUME (20).
             confirmed: SignalStatus::InsufficientData
         );
 
+        self::assertSame(SignalStatus::InsufficientData, $report->status);
+    }
+
+    /**
+     * The gap this floor change closes: a store between the old 5/day floor
+     * and the new 20/day one. At ~15 orders/day with a zero-count hour whose
+     * gap exceeds the 0.95 threshold, the pre-1.5.0 floor let this reach a
+     * percentile verdict and reported SEVERE_DROP -- exactly the overnight
+     * false positive confirmed in production on avalonguns' basket_quote,
+     * which pages a low-traffic merchant at 1:30am for an ordinary quiet
+     * night. It must now report INSUFFICIENT_DATA: the inter-arrival approach
+     * is only validated around 20-30+ orders/day, and below that a quiet
+     * night is indistinguishable from a real stop. Deleting the raised floor
+     * (reverting MIN_VALIDATED_DAILY_VOLUME to 5) makes this the only failing
+     * test.
+     */
+    public function testDailyVolumeInTheOldFiveToTwentyGapReportsInsufficientDataNotSevereDrop(): void
+    {
+        $report = $this->evaluateLowVolumeWithConfirmedStatus(
+            currentGapHours: 9,
+            bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
+            anchorCount: 84, // ~15/day: above the old 5/day floor, below the new 20/day one.
+            confirmed: SignalStatus::InsufficientData
+        );
+
+        // Under the old 5/day floor this reached the percentile path
+        // ([1,1,1,10] at 0.95 = 8.65; gap 9 > 8.65) and reported SevereDrop.
         self::assertSame(SignalStatus::InsufficientData, $report->status);
     }
 
@@ -883,7 +910,7 @@ class DispersionEvaluatorTest extends TestCase
         $rollupRepository->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
             currentGapHours: 9,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
-            anchorCount: 100, // high volume: >= MIN_VIABLE_DAILY_VOLUME, so the 0.95 default percentile applies.
+            anchorCount: 200, // ~35.7/day: >= MIN_VIABLE_DAILY_VOLUME (30), so the 0.95 default percentile applies.
         ));
 
         $latency = (new DispersionEvaluator($rollupRepository, $stateRepository))
@@ -909,7 +936,7 @@ class DispersionEvaluatorTest extends TestCase
         $rollupRepository->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
             currentGapHours: 9,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
-            anchorCount: 1, // ~0.18/day: below MIN_VALIDATED_DAILY_VOLUME (5).
+            anchorCount: 1, // ~0.18/day: below MIN_VALIDATED_DAILY_VOLUME (20).
         ));
 
         $latency = (new DispersionEvaluator($rollupRepository, $stateRepository))
@@ -984,7 +1011,7 @@ class DispersionEvaluatorTest extends TestCase
         $rollupRepository->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
             currentGapHours: 9,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
-            anchorCount: 100,
+            anchorCount: 200,
         ));
 
         $report = (new DispersionEvaluator($rollupRepository, $stateRepository))->evaluate(
