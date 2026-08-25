@@ -22,6 +22,8 @@ use Watchtower\Connector\Model\Diagnostics\StoreViewSnapshot;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
 use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\EnvironmentState;
+use Watchtower\Connector\Model\QueueHealth\Observation as QueueHealthObservation;
+use Watchtower\Connector\Model\QueueHealth\QueueStateObserver;
 use Watchtower\Connector\Model\Seed\SeedCoverageLabel;
 
 /**
@@ -399,6 +401,14 @@ class StatusCommandTest extends TestCase
         $provider = $this->createStub(DiagnosticsSnapshotProvider::class);
         $provider->method('snapshot')->willReturn($snapshot);
 
-        return new StatusCommand($config, $provider, new SeedCoverageLabel());
+        // Stubbed to a healthy poll: these tests are about the diagnostics
+        // rendering, not about queue detection, which QueueStateObserverTest
+        // covers directly.
+        $queueStateObserver = $this->createStub(QueueStateObserver::class);
+        $queueStateObserver->method('observe')->willReturn(
+            new QueueHealthObservation(undrainedSince: null, undrainedWithoutOnset: false)
+        );
+
+        return new StatusCommand($config, $provider, new SeedCoverageLabel(), $queueStateObserver);
     }
 }

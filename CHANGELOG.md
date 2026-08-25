@@ -5,6 +5,21 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.24.0] - 2026-08-25
+
+Adds the `queue_health` signal, reporting whether Magento's message-queue
+consumers are working through the jobs queued for them. Stock updates, bulk
+imports, product URL rebuilds and admin config saves all wait in these queues,
+and when nothing drains them that work piles up while cron itself still looks
+healthy. Queue depth alone is never the test: a store part-way through a bulk
+import legitimately holds a deep queue and is fine, so the signal reports on
+work left waiting with nothing processing it. Both queue backends are
+supported, resolved per consumer, so a store mixing RabbitMQ and the MySQL
+backend is read correctly. Running your consumers outside Magento's cron is a
+supported setup and is not treated as a fault. `bin/magento watchtower:status`
+names the affected queue locally; only the categorical status is transmitted.
+Requires platform connector metrics spec 2.12 or later.
+
 ## [1.23.0] - 2026-08-25
 
 Adds the `indexer_health` signal, reporting whether your indexers are current

@@ -14,6 +14,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
+use Watchtower\Connector\Model\QueueHealth\QueueStateObserver;
 use Watchtower\Connector\Model\Seed\SeedCoverageLabel;
 
 /**
@@ -32,12 +33,14 @@ class StatusCommand extends Command
      * @param Config $config
      * @param DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider
      * @param SeedCoverageLabel $seedCoverageLabel
+     * @param QueueStateObserver $queueStateObserver
      * @param string|null $name
      */
     public function __construct(
         private readonly Config $config,
         private readonly DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider,
         private readonly SeedCoverageLabel $seedCoverageLabel,
+        private readonly QueueStateObserver $queueStateObserver,
         ?string $name = null
     ) {
         parent::__construct($name);
@@ -125,6 +128,29 @@ class StatusCommand extends Command
     }
 
     /**
+     * Names the queues behind an unhealthy queue_health status.
+     *
+     * This detail never leaves the store. The wire payload carries the
+     * categorical status alone, because which queue is backed up implies which
+     * part of the business is busy, so a merchant acting on a queue_health
+     * alert has no other way to find out which one it was.
+     *
+     * @param OutputInterface $output
+     * @return void
+     */
+    private function printQueueHealthDetail(OutputInterface $output): void
+    {
+        $affected = $this->queueStateObserver
+            ->observe(new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+            ->affectedQueues;
+
+        $output->writeln(sprintf(
+            'queue_health: %s',
+            $affected === [] ? 'all watched consumers are draining' : 'undrained: '.implode(', ', $affected)
+        ));
+    }
+
+    /**
      * Prints cron_health plus every live store view's own per-category signal status.
      *
      * @param OutputInterface $output
@@ -139,6 +165,8 @@ class StatusCommand extends Command
             $snapshot->cronHealth->sequenceNumber,
             $snapshot->cronHealth->reason?->value ?? 'no data yet'
         ));
+
+        $this->printQueueHealthDetail($output);
 
         foreach ($snapshot->storeViews as $storeView) {
             $output->writeln(sprintf('Store view "%s" (id=%d):', $storeView->storeViewCode, $storeView->storeViewId));

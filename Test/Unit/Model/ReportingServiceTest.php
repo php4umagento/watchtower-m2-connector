@@ -27,6 +27,7 @@ use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
 use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\IndexerHealth\Evaluator as IndexerHealthEvaluator;
+use Watchtower\Connector\Model\QueueHealth\Evaluator as QueueHealthEvaluator;
 use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
 use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
@@ -156,7 +157,7 @@ class ReportingServiceTest extends TestCase
             ->with(
                 'https://watchtower.test',
                 'secret-api-key-value',
-                [$report, $this->adminAuthFailureReport(), $this->indexerHealthReport()]
+                [$report, $this->adminAuthFailureReport(), $this->indexerHealthReport(), $this->queueHealthReport()]
             )
             ->willReturn($result);
 
@@ -197,7 +198,7 @@ class ReportingServiceTest extends TestCase
         // admin_auth_failure and indexer_health reports service() injects when a
         // test does not configure its own. All three are install-scoped and
         // evaluated on every run(), so they land in the buffer together.
-        $bufferRepository->expects(self::exactly(3))->method('bufferReport')->willReturn(0);
+        $bufferRepository->expects(self::exactly(4))->method('bufferReport')->willReturn(0);
 
         $submissionService = $this->createMock(MetricsSubmissionService::class);
         $submissionService->expects(self::never())->method('submit');
@@ -238,7 +239,7 @@ class ReportingServiceTest extends TestCase
         // admin_auth_failure and indexer_health reports service() injects when a
         // test does not configure its own. All three are install-scoped and
         // evaluated on every run(), so they land in the buffer together.
-        $bufferRepository->expects(self::exactly(3))->method('bufferReport')->willReturn(0);
+        $bufferRepository->expects(self::exactly(4))->method('bufferReport')->willReturn(0);
 
         $submissionService = $this->createMock(MetricsSubmissionService::class);
         $submissionService->expects(self::never())->method('submit');
@@ -283,7 +284,7 @@ class ReportingServiceTest extends TestCase
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::once())->method('debug')->with(
             'Watchtower reporting cycle skipped submission.',
-            ['reason' => 'organization_paused', 'freshReportCount' => 3]
+            ['reason' => 'organization_paused', 'freshReportCount' => 4]
         );
 
         $this->service(
@@ -318,7 +319,7 @@ class ReportingServiceTest extends TestCase
         // admin_auth_failure and indexer_health reports service() injects when a
         // test does not configure its own. All three are install-scoped and
         // evaluated on every run(), so they land in the buffer together.
-        $bufferRepository->expects(self::exactly(3))->method('bufferReport')->willReturn(0);
+        $bufferRepository->expects(self::exactly(4))->method('bufferReport')->willReturn(0);
 
         $submissionService = $this->createMock(MetricsSubmissionService::class);
         $submissionService->expects(self::never())->method('submit');
@@ -360,7 +361,7 @@ class ReportingServiceTest extends TestCase
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::once())->method('debug')->with(
             'Watchtower reporting cycle skipped submission.',
-            ['reason' => 'connector_below_minimum_version', 'freshReportCount' => 3]
+            ['reason' => 'connector_below_minimum_version', 'freshReportCount' => 4]
         );
 
         $this->service(
@@ -520,6 +521,7 @@ class ReportingServiceTest extends TestCase
                     $freshReport,
                     $this->adminAuthFailureReport(),
                     $this->indexerHealthReport(),
+                    $this->queueHealthReport(),
                 ]
             )
             ->willReturn($result);
@@ -559,7 +561,7 @@ class ReportingServiceTest extends TestCase
         // failed attempt, need to be added to the buffer -- cron_health's
         // own report plus the default admin_auth_failure and indexer_health
         // reports service() injects when a test does not configure its own.
-        $bufferRepository->expects(self::exactly(3))->method('bufferReport')->willReturn(0);
+        $bufferRepository->expects(self::exactly(4))->method('bufferReport')->willReturn(0);
 
         $result = new MetricsSubmissionResult(succeeded: false, errorMessage: 'HTTP 429', retryAfterSeconds: 30);
         $submissionService = $this->createMock(MetricsSubmissionService::class);
@@ -568,7 +570,13 @@ class ReportingServiceTest extends TestCase
             ->with(
                 'https://watchtower.test',
                 'secret-api-key-value',
-                [$buffered->report, $freshReport, $this->adminAuthFailureReport(), $this->indexerHealthReport()]
+                [
+                    $buffered->report,
+                    $freshReport,
+                    $this->adminAuthFailureReport(),
+                    $this->indexerHealthReport(),
+                    $this->queueHealthReport(),
+                ]
             )
             ->willReturn($result);
 
@@ -648,7 +656,7 @@ class ReportingServiceTest extends TestCase
         self::assertCount(500, $capturedBatches[0], 'First request: the full buffer, no fresh report.');
         self::assertFalse(in_array($freshReport, $capturedBatches[0], true));
         self::assertEquals(
-            [$freshReport, $this->adminAuthFailureReport(), $this->indexerHealthReport()],
+            [$freshReport, $this->adminAuthFailureReport(), $this->indexerHealthReport(), $this->queueHealthReport()],
             $capturedBatches[1],
             'Second request: both fresh reports, once the buffer is drained.'
         );
@@ -696,7 +704,7 @@ class ReportingServiceTest extends TestCase
         // Not durably delivered (request 2 failed) -- buffered for retry.
         // All of request 2's fresh reports: cron_health's own plus the default
         // admin_auth_failure and indexer_health reports service() injects.
-        $bufferRepository->expects(self::exactly(3))->method('bufferReport')->willReturn(0);
+        $bufferRepository->expects(self::exactly(4))->method('bufferReport')->willReturn(0);
 
         $succeeded = new MetricsSubmissionResult(succeeded: true, accepted: 500, rejected: []);
         $failed = new MetricsSubmissionResult(succeeded: false, errorMessage: 'HTTP 429', retryAfterSeconds: 45);
@@ -760,11 +768,11 @@ class ReportingServiceTest extends TestCase
             }
         );
 
-        // 497 so the buffer plus the three install-scoped fresh reports fill
+        // 496 so the buffer plus the four install-scoped fresh reports fill
         // request 1 to exactly 500. Was 498 when there were two of them; the
         // number is tuned to sit on the boundary, which is the whole point of
         // this test, so it moves with the install-scoped count.
-        $bufferedCount = 497;
+        $bufferedCount = 496;
         $buffered = array_map(
             fn (int $i) => new BufferedReport(bufferId: $i, report: $this->report(sequenceNumber: $i)),
             range(1, $bufferedCount)
@@ -813,13 +821,15 @@ class ReportingServiceTest extends TestCase
         )->run();
 
         // freshReports is [cronHealth, adminAuthFailure, indexerHealth,
-        // basketQuote, checkout, customerAccount, checkoutFailure]: 497 buffered
-        // + the first THREE fresh reports (all install-scoped) fill request 1 to
-        // exactly 500, so every store-view report overflows into request 2.
+        // queueHealth, basketQuote, checkout, customerAccount, checkoutFailure]:
+        // 496 buffered + the first FOUR fresh reports (all install-scoped) fill
+        // request 1 to exactly 500, so every store-view report overflows into
+        // request 2.
         self::assertCount(500, $capturedBatches[0]);
         self::assertTrue(in_array($cronHealthReport, $capturedBatches[0], true));
         self::assertTrue(in_array($this->adminAuthFailureReport(), $capturedBatches[0]));
         self::assertTrue(in_array($this->indexerHealthReport(), $capturedBatches[0]));
+        self::assertTrue(in_array($this->queueHealthReport(), $capturedBatches[0]));
         self::assertFalse(in_array($basketQuoteStoreReport, $capturedBatches[0], true));
         self::assertFalse(in_array($checkoutStoreReport, $capturedBatches[0], true));
         self::assertFalse(in_array($customerAccountStoreReport, $capturedBatches[0], true));
@@ -1017,6 +1027,7 @@ class ReportingServiceTest extends TestCase
                     $cronHealthReport,
                     $this->adminAuthFailureReport(),
                     $this->indexerHealthReport(),
+                    $this->queueHealthReport(),
                     $basketQuoteStoreReport,
                     $checkoutStoreReport,
                     $customerAccountStoreReport,
@@ -1041,7 +1052,12 @@ class ReportingServiceTest extends TestCase
 
         self::assertSame($cronHealthReport, $outcome['report']);
         self::assertEquals(
-            [$cronHealthReport, $this->adminAuthFailureReport(), $this->indexerHealthReport()],
+            [
+                $cronHealthReport,
+                $this->adminAuthFailureReport(),
+                $this->indexerHealthReport(),
+                $this->queueHealthReport(),
+            ],
             $outcome['installReports']
         );
         self::assertSame(
@@ -1220,7 +1236,7 @@ class ReportingServiceTest extends TestCase
         // All three install-scoped reports (cron_health, admin_auth_failure,
         // indexer_health) plus four store-view reports: three rate categories
         // and checkout_failure.
-        $bufferRepository->expects(self::exactly(7))
+        $bufferRepository->expects(self::exactly(8))
             ->method('bufferReport')
             ->willReturnCallback(function (MetricReport $report) use (&$bufferedReports): int {
                 $bufferedReports[] = $report;
@@ -1252,6 +1268,7 @@ class ReportingServiceTest extends TestCase
                 $cronHealthReport,
                 $this->adminAuthFailureReport(),
                 $this->indexerHealthReport(),
+                $this->queueHealthReport(),
                 $basketQuoteStoreReport,
                 $checkoutStoreReport,
                 $customerAccountStoreReport,
@@ -1921,6 +1938,19 @@ class ReportingServiceTest extends TestCase
         );
     }
 
+    private function queueHealthReport(): MetricReport
+    {
+        return new MetricReport(
+            storeViewCode: null,
+            eventType: QueueHealthEvaluator::EVENT_TYPE,
+            status: SignalStatus::Normal,
+            sequenceNumber: 1,
+            evaluatedAt: new \DateTimeImmutable('2026-08-13T15:00:00+00:00'),
+            reason: ReportReason::Heartbeat,
+            rulesetVersion: QueueHealthEvaluator::RULESET_VERSION,
+        );
+    }
+
     private function storeViewReport(string $category, string $storeViewCode): MetricReport
     {
         return new MetricReport(
@@ -2050,6 +2080,10 @@ class ReportingServiceTest extends TestCase
         $indexerHealthEvaluator = $this->createStub(IndexerHealthEvaluator::class);
         $indexerHealthEvaluator->method('evaluate')->willReturn($this->indexerHealthReport());
 
+        // Same reason again: queue_health is install-scoped and unconditional.
+        $queueHealthEvaluator = $this->createStub(QueueHealthEvaluator::class);
+        $queueHealthEvaluator->method('evaluate')->willReturn($this->queueHealthReport());
+
         return new ReportingService(
             $config,
             $evaluator,
@@ -2077,6 +2111,7 @@ class ReportingServiceTest extends TestCase
             $connectorVersionCheckService,
             $connectorVersionStateRepository,
             $indexerHealthEvaluator,
+            $queueHealthEvaluator,
         );
     }
 

@@ -29,6 +29,7 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepositor
 use Watchtower\Connector\Model\IntegrationHealth\Observation;
 use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
+use Watchtower\Connector\Model\QueueHealth\Evaluator as QueueHealthEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
@@ -43,20 +44,21 @@ use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 /**
  * Shared "evaluate then submit" logic behind both watchtower:report and the
  * scheduled cron job. Evaluates the install-scoped signals (cron_health,
- * admin_auth_failure, indexer_health -- no store view) plus the three
- * rate-based categories, checkout_failure, and integration_health for every
- * live store view, then submits them together wherever possible. "Live"
+ * admin_auth_failure, indexer_health, queue_health -- no store view) plus the
+ * three rate-based categories, checkout_failure, and integration_health for
+ * every live store view, then submits them together wherever possible. "Live"
  * mirrors StoreViewSyncService's is_active filter.
  *
  * $freshReports is always [cronHealth, adminAuthFailure, indexerHealth,
- * ...storeViewReports]. Each install-scoped report is captured into its own
- * variable rather than derived positionally from that array, so adding one
- * cannot silently corrupt the store-view slice.
+ * queueHealth, ...storeViewReports]. Each install-scoped report is captured
+ * into its own variable rather than derived positionally from that array, so
+ * adding one cannot silently corrupt the store-view slice.
  *
  * It is not free, though, and the earlier version of this note overstated it:
- * adding indexer_health still required naming it in both 'installReports'
- * returns below. Named capture makes the addition a compile-visible edit
- * rather than an off-by-one; it does not make it a no-op.
+ * adding indexer_health, and then queue_health, each still required naming the
+ * new signal in both 'installReports' returns below. Named capture makes the
+ * addition a compile-visible edit rather than an off-by-one; it does not make
+ * it a no-op.
  *
  * The platform rejects a report whose sequence_number is at or below the
  * highest already accepted for that event type, so a submission may never
@@ -107,6 +109,7 @@ class ReportingService
      * @param ConnectorVersionCheckService $connectorVersionCheckService
      * @param ConnectorVersionStateRepository $connectorVersionStateRepository
      * @param IndexerHealthEvaluator $indexerHealthEvaluator
+     * @param QueueHealthEvaluator $queueHealthEvaluator
      */
     public function __construct(
         private readonly Config $config,
@@ -138,6 +141,7 @@ class ReportingService
         // above: every unit test builds this class positionally, so inserting a
         // parameter mid-list silently shifts a dozen unrelated arguments.
         private readonly IndexerHealthEvaluator $indexerHealthEvaluator,
+        private readonly QueueHealthEvaluator $queueHealthEvaluator,
     ) {
     }
 
@@ -202,9 +206,16 @@ class ReportingService
         $cronHealthReport = $this->cronHealthEvaluator->evaluate($now);
         $adminAuthFailureReport = $this->adminAuthFailureEvaluator->evaluate($this->lastCompleteHourStart($now), $now);
         $indexerHealthReport = $this->indexerHealthEvaluator->evaluate($now);
+        $queueHealthReport = $this->queueHealthEvaluator->evaluate($now);
         $storeViewReports = $this->liveStoreViewReports($now);
 
-        $freshReports = [$cronHealthReport, $adminAuthFailureReport, $indexerHealthReport, ...$storeViewReports];
+        $freshReports = [
+            $cronHealthReport,
+            $adminAuthFailureReport,
+            $indexerHealthReport,
+            $queueHealthReport,
+            ...$storeViewReports,
+        ];
 
         // Before anything is buffered or submitted: an expired report 422s the entire batch it rides in.
         $expiredCount = $this->reportBufferRepository->discardExpired($now);
@@ -228,7 +239,12 @@ class ReportingService
             return [
                 'ran' => true,
                 'report' => $freshReports[0],
-                'installReports' => [$cronHealthReport, $adminAuthFailureReport, $indexerHealthReport],
+                'installReports' => [
+                    $cronHealthReport,
+                    $adminAuthFailureReport,
+                    $indexerHealthReport,
+                    $queueHealthReport,
+                ],
                 'storeViewReports' => $storeViewReports,
                 'result' => null,
                 'includedBufferedCount' => 0,
@@ -309,7 +325,7 @@ class ReportingService
         return [
             'ran' => true,
             'report' => $freshReports[0],
-            'installReports' => [$cronHealthReport, $adminAuthFailureReport, $indexerHealthReport],
+            'installReports' => [$cronHealthReport, $adminAuthFailureReport, $indexerHealthReport, $queueHealthReport],
             'storeViewReports' => $storeViewReports,
             'result' => $lastResult,
             'includedBufferedCount' => $totalIncludedBuffered,
