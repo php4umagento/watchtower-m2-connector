@@ -29,6 +29,7 @@ use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
 use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
+use Watchtower\Connector\Model\IndexerHealth\Evaluator as IndexerHealthEvaluator;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
@@ -290,6 +291,7 @@ class ReportingCyclePerfTest extends TestCase
             $this->createStub(SubmissionOutcomeRepository::class),
             $this->stubConnectorVersionCheckService(),
             $this->stubConnectorVersionStateRepository(),
+            $this->createStub(IndexerHealthEvaluator::class),
         );
     }
 

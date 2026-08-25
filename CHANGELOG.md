@@ -5,6 +5,16 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.23.0] - 2026-08-25
+
+Adds the `indexer_health` signal, reporting whether your indexers are current
+and the materialized-view backlog is draining. It catches the case where
+everything else looks fine while the storefront serves stale prices and
+out-of-date category pages because a reindex never finished. Reports on how
+long the condition has lasted, not on the bare status, so an indexer briefly
+invalid after an import does not alert. Requires platform connector metrics
+spec 2.10 or later.
+
 ## [1.22.0] - 2026-08-24
 
 Raises the minimum store volume at which the rate-based signals (cart

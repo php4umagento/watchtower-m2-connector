@@ -19,6 +19,7 @@ use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvalu
 use Watchtower\Connector\Model\CronHealth\Evaluator;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
 use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
+use Watchtower\Connector\Model\IndexerHealth\Evaluator as IndexerHealthEvaluator;
 use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
 use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
 use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
@@ -41,18 +42,21 @@ use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 
 /**
  * Shared "evaluate then submit" logic behind both watchtower:report and the
- * scheduled cron job. Evaluates cron_health and admin_auth_failure
- * (install-scoped, no store view) plus the three rate-based categories,
- * checkout_failure, and integration_health for every live store view, then
- * submits them together wherever possible. "Live" mirrors
- * StoreViewSyncService's is_active filter.
+ * scheduled cron job. Evaluates the install-scoped signals (cron_health,
+ * admin_auth_failure, indexer_health -- no store view) plus the three
+ * rate-based categories, checkout_failure, and integration_health for every
+ * live store view, then submits them together wherever possible. "Live"
+ * mirrors StoreViewSyncService's is_active filter.
  *
- * $freshReports is always [cronHealth, adminAuthFailure, ...storeViewReports].
- * The two install-scoped reports are captured into their own variables
- * rather than derived positionally from that array, precisely so a caller
- * distinguishing "the install-scoped reports" from "the store-view-scoped
- * reports" cannot silently break the moment a third install-scoped signal
- * exists.
+ * $freshReports is always [cronHealth, adminAuthFailure, indexerHealth,
+ * ...storeViewReports]. Each install-scoped report is captured into its own
+ * variable rather than derived positionally from that array, so adding one
+ * cannot silently corrupt the store-view slice.
+ *
+ * It is not free, though, and the earlier version of this note overstated it:
+ * adding indexer_health still required naming it in both 'installReports'
+ * returns below. Named capture makes the addition a compile-visible edit
+ * rather than an off-by-one; it does not make it a no-op.
  *
  * The platform rejects a report whose sequence_number is at or below the
  * highest already accepted for that event type, so a submission may never
@@ -102,6 +106,7 @@ class ReportingService
      * @param SubmissionOutcomeRepository $submissionOutcomeRepository
      * @param ConnectorVersionCheckService $connectorVersionCheckService
      * @param ConnectorVersionStateRepository $connectorVersionStateRepository
+     * @param IndexerHealthEvaluator $indexerHealthEvaluator
      */
     public function __construct(
         private readonly Config $config,
@@ -129,6 +134,10 @@ class ReportingService
         private readonly SubmissionOutcomeRepository $submissionOutcomeRepository,
         private readonly ConnectorVersionCheckService $connectorVersionCheckService,
         private readonly ConnectorVersionStateRepository $connectorVersionStateRepository,
+        // Appended rather than grouped with the other install-scoped evaluators
+        // above: every unit test builds this class positionally, so inserting a
+        // parameter mid-list silently shifts a dozen unrelated arguments.
+        private readonly IndexerHealthEvaluator $indexerHealthEvaluator,
     ) {
     }
 
@@ -185,16 +194,17 @@ class ReportingService
         $belowMinimumVersion = $this->connectorVersionStateRepository->get()->belowMinimum;
 
         // cron_health must stay at index 0; callers read $outcome['report'] from
-        // there. admin_auth_failure sits at index 1, the second and only other
-        // install-scoped signal -- both are captured into their own variables
-        // rather than assembled positionally, because "storeViewReports is
-        // everything after the install-scoped ones" stopped being expressible
-        // as a single array_slice offset the moment a second one existed.
+        // there. The other install-scoped signals follow it -- each captured
+        // into its own variable rather than assembled positionally, because
+        // "storeViewReports is everything after the install-scoped ones"
+        // stopped being expressible as a single array_slice offset the moment a
+        // second one existed, and there are three now.
         $cronHealthReport = $this->cronHealthEvaluator->evaluate($now);
         $adminAuthFailureReport = $this->adminAuthFailureEvaluator->evaluate($this->lastCompleteHourStart($now), $now);
+        $indexerHealthReport = $this->indexerHealthEvaluator->evaluate($now);
         $storeViewReports = $this->liveStoreViewReports($now);
 
-        $freshReports = [$cronHealthReport, $adminAuthFailureReport, ...$storeViewReports];
+        $freshReports = [$cronHealthReport, $adminAuthFailureReport, $indexerHealthReport, ...$storeViewReports];
 
         // Before anything is buffered or submitted: an expired report 422s the entire batch it rides in.
         $expiredCount = $this->reportBufferRepository->discardExpired($now);
@@ -218,7 +228,7 @@ class ReportingService
             return [
                 'ran' => true,
                 'report' => $freshReports[0],
-                'installReports' => [$cronHealthReport, $adminAuthFailureReport],
+                'installReports' => [$cronHealthReport, $adminAuthFailureReport, $indexerHealthReport],
                 'storeViewReports' => $storeViewReports,
                 'result' => null,
                 'includedBufferedCount' => 0,
@@ -299,7 +309,7 @@ class ReportingService
         return [
             'ran' => true,
             'report' => $freshReports[0],
-            'installReports' => [$cronHealthReport, $adminAuthFailureReport],
+            'installReports' => [$cronHealthReport, $adminAuthFailureReport, $indexerHealthReport],
             'storeViewReports' => $storeViewReports,
             'result' => $lastResult,
             'includedBufferedCount' => $totalIncludedBuffered,
