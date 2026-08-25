@@ -144,9 +144,16 @@ class StatusCommand extends Command
             ->observe(new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
             ->affectedQueues;
 
+        // Phrased as "work waiting", not "undrained". On the MySQL backend a
+        // busy store nearly always has something pending, and that is healthy
+        // until it stays put past the window -- calling every queue with a
+        // message in it undrained would cry wolf on every run. The verdict is
+        // the queue_health status itself; this line only says where to look.
         $output->writeln(sprintf(
             'queue_health: %s',
-            $affected === [] ? 'all watched consumers are draining' : 'undrained: '.implode(', ', $affected)
+            $affected === []
+                ? 'no work waiting in watched queues'
+                : 'work waiting in: '.implode(', ', $affected)
         ));
     }
 

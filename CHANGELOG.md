@@ -5,6 +5,14 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.24.1] - 2026-08-25
+
+Corrects the `queue_health` line in `bin/magento watchtower:status`, which
+described every queue holding a message as "undrained". On the MySQL queue
+backend a busy store nearly always has work pending, which is healthy until it
+stays put, so the line now reads "work waiting in" and leaves the verdict to
+the signal status itself.
+
 ## [1.24.0] - 2026-08-25
 
 Adds the `queue_health` signal, reporting whether Magento's message-queue
