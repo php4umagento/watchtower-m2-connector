@@ -5,6 +5,16 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.26.0] - 2026-08-27
+
+Adds a **Custom integrations** section to **Watchtower > Integrations**, for
+integrations that never run as a scheduled job, such as an ERP that pushes into
+your store over the API. Your own code sends a `watchtower_integration_health`
+event and the label appears there to be ticked. You can only select events we
+have actually received, never type a name in, since a name with a typo would
+look healthy forever while the integration behind it was dead.
+`bin/magento watchtower:status` now names a failing custom integration too.
+
 ## [1.25.0] - 2026-08-27
 
 Replaces how `integration_health` is set up. You now tick the integrations you
