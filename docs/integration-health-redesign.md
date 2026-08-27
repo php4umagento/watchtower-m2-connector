@@ -267,26 +267,29 @@ debounce, one status per store view, exactly as now.
 
 Implementation, in order:
 
-1. `WatchedIntegrationRepository`: add `WATCH_TYPE_EVENT`, a
-   `watchedEventLabels()` reader, and a third argument to `save()`. The column
-   is already `varchar(16)`, so no schema change.
-2. `WatchedJobResolver`: return event labels alongside job codes. They are not
-   expanded from modules, so they pass through untouched.
-3. `WatchedSetEvaluator`: for each watched label, read
-   `IntegrationHealthEventRepository::latestObservation($storeViewId, $label,
-   $now)` and derive its threshold from that label's dispatch gaps. Fold the
-   result into `worstOf()`. Include the labels in `fingerprint()` so changing
-   them re-seeds.
-4. Migration: `MigrateIntegrationHealthSources` currently logs
-   `convention_event` rows as unmigratable. Carry them over instead, and drop
-   that half of the warning.
-5. Admin: a free-text label field, offering labels already seen in the event
-   table. Offering observed labels matters more than it sounds, because a
-   typo produces silence forever with no feedback, which is the failure this
-   whole redesign exists to remove.
-6. Spec: update `connector-metrics-spec.md` 2.14, which currently records this
-   as an open gap, and the docs article in `DocsSeeder.php`, which deliberately
-   does not mention events yet.
+1. ~~`WatchedIntegrationRepository`: `WATCH_TYPE_EVENT`, `watchedEventLabels()`,
+   third argument to `save()`.~~ **Done.** A null event list means "leave event
+   entries alone", so the admin controller cannot delete one it cannot yet edit.
+2. ~~`WatchedJobResolver`: return event labels alongside job codes.~~ **Done**,
+   as `resolveEventLabels()`.
+3. ~~`WatchedSetEvaluator`: fold labels into `worstOf()` and `fingerprint()`,
+   deriving each threshold from its dispatch gaps.~~ **Done**, via
+   `IntegrationHealthEventRepository::successGapSeconds()`.
+4. ~~Migration: carry `convention_event` rows over.~~ **Done.** Only
+   `queue_consumer` remains unmigratable.
+5. **Admin: still to do.** A free-text label field, offering labels already
+   seen in the event table. Offering observed labels matters more than it
+   sounds, because a typo produces silence forever with no feedback, which is
+   the failure this whole redesign exists to remove. Until this lands, events
+   arrive only by migration and cannot be added on a fresh install.
+6. **Spec: still to do.** `connector-metrics-spec.md` 2.14 records this as an
+   open gap and the docs article in `DocsSeeder.php` does not mention events;
+   both should be updated once step 5 makes the feature reachable.
+
+Also outstanding: `WatchedSetEvaluator::unhealthyJobCodes()`, which
+`watchtower:status` reads, still covers cron jobs only. An unhealthy event
+drives the rolled-up status correctly but is not named in the local detail
+line.
 
 The `queue_consumer` source stays retired. The evidence against it (zero
 `magento_operation` rows on vanilla, no third-party consumers on the production
