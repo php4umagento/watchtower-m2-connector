@@ -129,6 +129,31 @@ class WatchedSetEvaluator
     }
 
     /**
+     * The watched event labels currently judged unhealthy for one store view.
+     *
+     * Store-view-scoped, unlike unhealthyJobCodes above, because a dispatch
+     * carries a store id and the same label can be healthy in one store view
+     * and stalled in another.
+     *
+     * @param string[] $eventLabels
+     * @param int $storeViewId
+     * @param \DateTimeImmutable $now
+     * @return string[]
+     */
+    public function unhealthyEventLabels(array $eventLabels, int $storeViewId, \DateTimeImmutable $now): array
+    {
+        $unhealthy = [];
+
+        foreach ($eventLabels as $eventLabel) {
+            if ($this->isAnomalous($this->eventStatusFor($storeViewId, $eventLabel, $now))) {
+                $unhealthy[] = $eventLabel;
+            }
+        }
+
+        return $unhealthy;
+    }
+
+    /**
      * The worst status across the watched set.
      *
      * INSUFFICIENT_DATA only wins when it is all there is: a set with one

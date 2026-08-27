@@ -387,6 +387,7 @@ class StatusCommandTest extends TestCase
 
         $evaluator = $this->createStub(WatchedSetEvaluator::class);
         $evaluator->method('unhealthyJobCodes')->willReturn(['ess_m2epro']);
+        $evaluator->method('unhealthyEventLabels')->willReturn([]);
 
         $tester = new CommandTester($this->command(watchedJobResolver: $resolver, watchedSetEvaluator: $evaluator));
         $tester->execute([]);

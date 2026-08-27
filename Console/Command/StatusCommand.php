@@ -171,26 +171,38 @@ class StatusCommand extends Command
      * watch is actually at fault. Same split queue_health above already makes.
      *
      * @param OutputInterface $output
+     * @param DiagnosticsSnapshot $snapshot
      * @return void
      */
-    private function printIntegrationHealthDetail(OutputInterface $output): void
+    private function printIntegrationHealthDetail(OutputInterface $output, DiagnosticsSnapshot $snapshot): void
     {
-        $watched = $this->watchedJobResolver->resolve();
+        $watchedJobs = $this->watchedJobResolver->resolve();
+        $watchedEvents = $this->watchedJobResolver->resolveEventLabels();
 
-        if ($watched === []) {
+        if ($watchedJobs === [] && $watchedEvents === []) {
             $output->writeln('integration_health: no integrations selected, so this signal is not evaluated');
 
             return;
         }
 
-        $unhealthy = $this->watchedSetEvaluator->unhealthyJobCodes(
-            $watched,
-            new \DateTimeImmutable('now', new \DateTimeZone('UTC'))
-        );
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $unhealthy = $this->watchedSetEvaluator->unhealthyJobCodes($watchedJobs, $now);
+
+        // Events are judged per store view, so the same label can be failing in
+        // one and fine in another. Named with its store view to say which.
+        foreach ($snapshot->storeViews as $storeView) {
+            foreach ($this->watchedSetEvaluator->unhealthyEventLabels(
+                $watchedEvents,
+                $storeView->storeViewId,
+                $now
+            ) as $label) {
+                $unhealthy[] = $label.' ('.$storeView->storeViewCode.')';
+            }
+        }
 
         $output->writeln(sprintf(
             'integration_health: watching %d, %s',
-            count($watched),
+            count($watchedJobs) + count($watchedEvents),
             $unhealthy === []
                 ? 'none currently failing'
                 : 'currently failing: '.implode(', ', $unhealthy)
@@ -214,7 +226,7 @@ class StatusCommand extends Command
         ));
 
         $this->printQueueHealthDetail($output);
-        $this->printIntegrationHealthDetail($output);
+        $this->printIntegrationHealthDetail($output, $snapshot);
 
         foreach ($snapshot->storeViews as $storeView) {
             $output->writeln(sprintf('Store view "%s" (id=%d):', $storeView->storeViewCode, $storeView->storeViewId));
