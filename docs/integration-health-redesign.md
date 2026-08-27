@@ -1,8 +1,10 @@
 # Integration Health: selection model redesign
 
-Status: design agreed, not yet implemented.
-Scope: connector-side only. No change to `docs/connector-metrics-spec.md` in
-`watchtower-saas`, and no platform-side work. See "Wire compatibility" for why.
+Status: shipped across v1.25.0, v1.26.0 and v1.27.0. The "Why" section below is
+kept as the record of what was wrong and how it was measured, not a description
+of the current page.
+Scope: connector-side only. The wire contract did not change; the spec was
+updated at 2.14 to describe the new selection model. See "Wire compatibility".
 
 ## Why this is being redesigned
 
