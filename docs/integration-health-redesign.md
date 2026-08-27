@@ -295,6 +295,47 @@ The `queue_consumer` source stays retired. The evidence against it (zero
 `magento_operation` rows on vanilla, no third-party consumers on the production
 store checked) is unchanged.
 
+## Open: retiring the old model
+
+No merchant install carries the retired per-store-view configuration, which
+removes the constraint the rest of this section was written around. Nothing has
+to be preserved, so the whole old path goes at once rather than in the careful
+sequence a live install would have forced.
+
+`AvailableSourcesProvider` and `IntegrationHealthConfigValidator` are already
+deleted. What remains, in order:
+
+1. **Delete `MigrateIntegrationHealthSources` and its test.** It exists only to
+   rescue rows nobody has. It cannot be deleted on its own, though: while
+   `ReportingService` still falls back to the old configuration, removing the
+   migration would leave an install that had config working through the
+   fallback and never moving off it, which is worse than either end state.
+   Steps 1 and 2 land together.
+2. **Remove `ReportingService`'s pre-migration fallback**, along with
+   `observeConfiguredSource()` and `snapshotIntegrationHealthEvidence()`. The
+   observation and event tables own that evidence now, so the every-tick call
+   in `Cron\ReportJob` goes too.
+3. **Repoint `DiagnosticsSnapshotProvider`**, which still asks the config
+   repository whether a store view has integration_health configured. It should
+   ask the watched set instead.
+4. **Delete** `IntegrationHealthConfigRepository`, `IntegrationHealthConfig`,
+   the per-source `IntegrationHealth\Evaluator`, `QueueConsumerObserver` and
+   `ConventionEventReader`, with their tests.
+5. **Drop `watchtower_integration_health_config`** from `db_schema.xml`. Its
+   `db_schema_whitelist.json` entry stays, per the additive-never-pruned rule.
+   With no migration left there is no ordering problem; had one survived, the
+   table could not be dropped in the same release, because declarative schema
+   applies before data patches and the patch would find nothing.
+
+The bulk of the effort is test surgery rather than production code: about 45
+references and a dozen legacy-path test methods in `ReportingServiceTest`, plus
+`ReportingCyclePerfTest` and `DiagnosticsSnapshotProviderTest`, all of which
+construct the service positionally or by name with dependencies that are going
+away.
+
+`CronJobObserver`, `IntegrationHealthEventRepository`, `ConventionEventObserver`
+and `IntegrationHealthState`/its repository all stay: the new path uses them.
+
 ## Migration
 
 Existing `watchtower_integration_health_config` rows must not silently stop
