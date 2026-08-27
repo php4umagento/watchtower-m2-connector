@@ -53,4 +53,14 @@ class WatchedJobResolver
 
         return array_values(array_unique($jobCodes));
     }
+
+    /**
+     * Watched convention event labels, which expand from nothing and pass straight through.
+     *
+     * @return string[]
+     */
+    public function resolveEventLabels(): array
+    {
+        return $this->watchedIntegrationRepository->watchedEventLabels();
+    }
 }

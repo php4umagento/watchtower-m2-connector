@@ -16,6 +16,7 @@ use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
 use Watchtower\Connector\Model\CronJobObservation\JobRunObservation;
 use Watchtower\Connector\Model\CronJobObservation\JobRunObservationRepository;
 use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthEventRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthState;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\Observation;
@@ -154,6 +155,79 @@ class WatchedSetEvaluatorTest extends TestCase
     }
 
     /**
+     * A convention event is store-view-scoped and measured from its own
+     * dispatch history, so it needs no typed interval and folds into the same
+     * worst-of as the cron jobs.
+     */
+    public function testAStaleConventionEventDrivesTheSetSevere(): void
+    {
+        $saved = null;
+        $this->evaluateWithEvent('acme_erp', lastSuccess: '-3 days', saved: $saved);
+
+        self::assertSame(SignalStatus::SevereDrop, $saved->pendingStatus);
+    }
+
+    public function testAFreshConventionEventReportsNormal(): void
+    {
+        $saved = null;
+        $report = $this->evaluateWithEvent('acme_erp', lastSuccess: '-2 minutes', saved: $saved);
+
+        self::assertSame(SignalStatus::Normal, $report->status);
+    }
+
+    /**
+     * Runs one tick over a set containing a single convention event.
+     *
+     * @param string $label
+     * @param string $lastSuccess relative time of the label's last ok dispatch
+     * @param IntegrationHealthState|null $saved
+     * @return MetricReport
+     */
+    private function evaluateWithEvent(
+        string $label,
+        string $lastSuccess,
+        ?IntegrationHealthState &$saved = null
+    ): MetricReport {
+        $eventRepository = $this->createStub(IntegrationHealthEventRepository::class);
+        // Eight tight gaps, so the cadence is confident and the window is the
+        // one-hour floor rather than the learning state.
+        $eventRepository->method('successGapSeconds')->willReturn(array_fill(0, 8, 300));
+        $eventRepository->method('latestObservation')->willReturn(new Observation(
+            latestSuccessAt: $this->now()->modify($lastSuccess),
+            latestFailureAt: null,
+        ));
+
+        $stateRepository = $this->createStub(IntegrationHealthStateRepository::class);
+        $stateRepository->method('save')->willReturnCallback(
+            function (IntegrationHealthState $state) use (&$saved): void {
+                $saved = $state;
+            }
+        );
+        $stateRepository->method('get')->willReturn(new IntegrationHealthState(
+            storeViewId: self::STORE_VIEW_ID,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            pendingStatus: null,
+            confirmedStatus: SignalStatus::Normal,
+            sequenceNumber: 5,
+            lastReportedReason: ReportReason::Heartbeat,
+            sourceType: WatchedSetEvaluator::SOURCE_TYPE,
+            sourceIdentifier: $this->fingerprint([$label]),
+            observingSince: null,
+        ));
+
+        $evaluator = new WatchedSetEvaluator(
+            $stateRepository,
+            $this->createStub(JobRunObservationRepository::class),
+            new CadenceEstimator(),
+            $this->createStub(CronJobObserver::class),
+            $eventRepository
+        );
+
+        return $evaluator->evaluate(self::STORE_VIEW_ID, self::STORE_VIEW_CODE, [], [$label], $this->now());
+    }
+
+    /**
      * Runs one tick over a watched set.
      *
      * @param string[] $jobCodes
@@ -180,7 +254,7 @@ class WatchedSetEvaluatorTest extends TestCase
             $saved
         );
 
-        return $evaluator->evaluate(self::STORE_VIEW_ID, self::STORE_VIEW_CODE, $jobCodes, $this->now());
+        return $evaluator->evaluate(self::STORE_VIEW_ID, self::STORE_VIEW_CODE, $jobCodes, [], $this->now());
     }
 
     /**
@@ -260,7 +334,8 @@ class WatchedSetEvaluatorTest extends TestCase
             $stateRepository,
             $observationRepository,
             new CadenceEstimator(),
-            $cronJobObserver
+            $cronJobObserver,
+            $this->createStub(IntegrationHealthEventRepository::class)
         );
     }
 

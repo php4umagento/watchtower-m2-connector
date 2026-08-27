@@ -12,6 +12,8 @@ use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
+use Watchtower\Connector\Model\CronJobObservation\CronJobRunRecorder;
+use Watchtower\Connector\Model\CronJobObservation\JobRunObservation;
 use Watchtower\Connector\Model\CronJobObservation\JobRunObservationRepository;
 use Watchtower\Connector\Model\Debounce\TwoEvaluationDebounce;
 
@@ -41,6 +43,7 @@ class WatchedSetEvaluator
      * @param JobRunObservationRepository $observationRepository
      * @param CadenceEstimator $cadenceEstimator
      * @param CronJobObserver $cronJobObserver failure evidence, which observations do not carry
+     * @param IntegrationHealthEventRepository $eventRepository convention event dispatch history
      * @param TwoEvaluationDebounce|null $debounce stateless, no DI wiring needed
      */
     public function __construct(
@@ -48,6 +51,7 @@ class WatchedSetEvaluator
         private readonly JobRunObservationRepository $observationRepository,
         private readonly CadenceEstimator $cadenceEstimator,
         private readonly CronJobObserver $cronJobObserver,
+        private readonly IntegrationHealthEventRepository $eventRepository,
         ?TwoEvaluationDebounce $debounce = null,
     ) {
         $this->debounce = $debounce ?? new TwoEvaluationDebounce();
@@ -59,6 +63,7 @@ class WatchedSetEvaluator
      * @param int $storeViewId
      * @param string $storeViewCode
      * @param string[] $jobCodes every watched job, already expanded from modules
+     * @param string[] $eventLabels watched convention event labels, judged per store view
      * @param \DateTimeImmutable $now
      * @return MetricReport
      */
@@ -66,10 +71,11 @@ class WatchedSetEvaluator
         int $storeViewId,
         string $storeViewCode,
         array $jobCodes,
+        array $eventLabels,
         \DateTimeImmutable $now
     ): MetricReport {
         $state = $this->repository->get($storeViewId);
-        $fingerprint = $this->fingerprint($jobCodes);
+        $fingerprint = $this->fingerprint(array_merge($jobCodes, $eventLabels));
 
         // The stored verdict describes different jobs, so re-seed. Heartbeat
         // rather than Transition: editing your own selection is not an alert.
@@ -79,7 +85,7 @@ class WatchedSetEvaluator
             return $this->report($storeViewCode, SignalStatus::InsufficientData, $state->sequenceNumber, $now);
         }
 
-        $rawStatus = $this->worstOf($jobCodes, $now);
+        $rawStatus = $this->worstOf($jobCodes, $eventLabels, $storeViewId, $now);
         $decision = $this->debounce->decide($rawStatus, $state->confirmedStatus, $state->pendingStatus);
 
         $this->save(
@@ -129,15 +135,25 @@ class WatchedSetEvaluator
      * learning job and one healthy job is fine so far, not unknown.
      *
      * @param string[] $jobCodes
+     * @param string[] $eventLabels
+     * @param int $storeViewId
      * @param \DateTimeImmutable $now
      * @return SignalStatus
      */
-    private function worstOf(array $jobCodes, \DateTimeImmutable $now): SignalStatus
-    {
+    private function worstOf(
+        array $jobCodes,
+        array $eventLabels,
+        int $storeViewId,
+        \DateTimeImmutable $now
+    ): SignalStatus {
         $seen = [];
 
         foreach ($jobCodes as $jobCode) {
             $seen[$this->statusFor($jobCode, $now)->value] = true;
+        }
+
+        foreach ($eventLabels as $eventLabel) {
+            $seen[$this->eventStatusFor($storeViewId, $eventLabel, $now)->value] = true;
         }
 
         foreach ([SignalStatus::SevereDrop, SignalStatus::MildDrop, SignalStatus::Normal] as $status) {
@@ -170,10 +186,70 @@ class WatchedSetEvaluator
         }
 
         $observed = $this->cronJobObserver->observe($jobCode, $now);
-        $lastSuccessAt = $this->later($observed->latestSuccessAt, $observation?->lastSuccessAt);
-        $lastFailureAt = $observed->latestFailureAt;
 
-        if ($lastSuccessAt !== null && $lastSuccessAt >= $now->modify('-' . $threshold . ' seconds')) {
+        return $this->classify(
+            $threshold,
+            $this->later($observed->latestSuccessAt, $observation?->lastSuccessAt),
+            $observed->latestFailureAt,
+            $now
+        );
+    }
+
+    /**
+     * One watched convention event label's raw status for this store view.
+     *
+     * Store-view-scoped, unlike a cron job: a dispatch carries a store id. Its
+     * window is measured from the recorded dispatch history, so an event needs
+     * no typed interval either.
+     *
+     * @param int $storeViewId
+     * @param string $eventLabel
+     * @param \DateTimeImmutable $now
+     * @return SignalStatus
+     */
+    private function eventStatusFor(int $storeViewId, string $eventLabel, \DateTimeImmutable $now): SignalStatus
+    {
+        $gaps = $this->eventRepository->successGapSeconds(
+            $storeViewId,
+            $eventLabel,
+            CronJobRunRecorder::MAX_GAP_SAMPLES
+        );
+
+        // The estimator only reads the gaps and the run count, so the dispatch
+        // history is fed through the same rule the cron side uses.
+        $threshold = $this->cadenceEstimator->estimate(new JobRunObservation(
+            jobCode: $eventLabel,
+            firstObservedAt: $now,
+            lastSuccessAt: null,
+            observedRunCount: count($gaps) + 1,
+            gapSamples: $gaps,
+        ))->thresholdSeconds;
+
+        if ($threshold === null) {
+            return SignalStatus::InsufficientData;
+        }
+
+        $observed = $this->eventRepository->latestObservation($storeViewId, $eventLabel, $now);
+
+        return $this->classify($threshold, $observed->latestSuccessAt, $observed->latestFailureAt, $now);
+    }
+
+    /**
+     * Turns one source's evidence into a status.
+     *
+     * @param int $thresholdSeconds
+     * @param \DateTimeImmutable|null $lastSuccessAt
+     * @param \DateTimeImmutable|null $lastFailureAt
+     * @param \DateTimeImmutable $now
+     * @return SignalStatus
+     */
+    private function classify(
+        int $thresholdSeconds,
+        ?\DateTimeImmutable $lastSuccessAt,
+        ?\DateTimeImmutable $lastFailureAt,
+        \DateTimeImmutable $now
+    ): SignalStatus {
+        if ($lastSuccessAt !== null && $lastSuccessAt >= $now->modify('-' . $thresholdSeconds . ' seconds')) {
             return SignalStatus::Normal;
         }
 

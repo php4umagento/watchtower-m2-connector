@@ -23,6 +23,12 @@ class WatchedIntegrationRepository
     public const WATCH_TYPE_MODULE = 'module';
     public const WATCH_TYPE_JOB = 'job';
 
+    /**
+     * A watchtower_integration_health convention event label. Unlike the other
+     * two this is store-view-scoped, since a dispatch carries a store id.
+     */
+    public const WATCH_TYPE_EVENT = 'event';
+
     private const TABLE = 'watchtower_watched_integration';
 
     /**
@@ -54,6 +60,16 @@ class WatchedIntegrationRepository
     }
 
     /**
+     * Watched convention event integration labels.
+     *
+     * @return string[]
+     */
+    public function watchedEventLabels(): array
+    {
+        return $this->identifiersOfType(self::WATCH_TYPE_EVENT);
+    }
+
+    /**
      * Whether anything at all is watched.
      *
      * The signal is optional: choosing nothing means not evaluated, never
@@ -72,16 +88,20 @@ class WatchedIntegrationRepository
     }
 
     /**
-     * Replaces the entire watched set in one transaction.
+     * Replaces the watched set in one transaction.
      *
      * Replace rather than merge: the page posts the whole set, and a partial
      * write would leave an unticked integration silently still watched.
      *
+     * A null $eventLabels leaves existing event entries alone, so a caller
+     * that cannot edit them yet cannot delete them either.
+     *
      * @param string[] $moduleNames
      * @param string[] $jobCodes
+     * @param string[]|null $eventLabels null to leave event entries untouched
      * @return void
      */
-    public function save(array $moduleNames, array $jobCodes): void
+    public function save(array $moduleNames, array $jobCodes, ?array $eventLabels = null): void
     {
         $connection = $this->resourceConnection->getConnection();
         $table = $this->resourceConnection->getTableName(self::TABLE);
@@ -94,6 +114,10 @@ class WatchedIntegrationRepository
 
         foreach (array_unique($jobCodes) as $jobCode) {
             $rows[] = ['watch_type' => self::WATCH_TYPE_JOB, 'identifier' => (string) $jobCode];
+        }
+
+        foreach (array_unique($eventLabels ?? $this->watchedEventLabels()) as $eventLabel) {
+            $rows[] = ['watch_type' => self::WATCH_TYPE_EVENT, 'identifier' => (string) $eventLabel];
         }
 
         $connection->beginTransaction();

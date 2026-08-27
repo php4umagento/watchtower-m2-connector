@@ -83,6 +83,52 @@ class IntegrationHealthEventRepository
     }
 
     /**
+     * Gaps in seconds between this label's recorded successes, oldest first.
+     *
+     * Lets a convention event derive its window the same way a cron job does,
+     * so events need no typed interval either. This table keeps one row per
+     * dispatch, so the history is already here.
+     *
+     * @param int $storeViewId
+     * @param string $integrationLabel
+     * @param int $limit most recent successes to measure across
+     * @return int[]
+     */
+    public function successGapSeconds(int $storeViewId, string $integrationLabel, int $limit): array
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $table = $this->resourceConnection->getTableName(self::TABLE);
+
+        // One extra row: N gaps need N+1 timestamps.
+        $observedAt = $connection->fetchCol(
+            $connection->select()
+                ->from($table, ['observed_at'])
+                ->where('store_view_id = ?', $storeViewId)
+                ->where('integration_label = ?', $integrationLabel)
+                ->where('status = ?', 'ok')
+                ->order('observed_at DESC')
+                ->limit($limit + 1)
+        );
+
+        $ascending = array_reverse(array_map(
+            fn (string $value): int => $this->toUtc($value)->getTimestamp(),
+            array_map('strval', $observedAt)
+        ));
+
+        $gaps = [];
+
+        for ($i = 1, $count = count($ascending); $i < $count; $i++) {
+            $gap = $ascending[$i] - $ascending[$i - 1];
+
+            if ($gap > 0) {
+                $gaps[] = $gap;
+            }
+        }
+
+        return $gaps;
+    }
+
+    /**
      * Fetches the freshest success/failure evidence for one (store view, integration label) pair.
      *
      * @param int $storeViewId

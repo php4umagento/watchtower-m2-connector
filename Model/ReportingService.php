@@ -509,6 +509,7 @@ class ReportingService
         // declared cron job, so resolving per store view would turn a fixed
         // cost into one multiplied by store view count.
         $watchedJobCodes = $this->watchedJobResolver->resolve();
+        $watchedEventLabels = $this->watchedJobResolver->resolveEventLabels();
 
         $readersByCategory = [
             HistorySeeder::CATEGORY_BASKET_QUOTE => $this->basketQuoteReader,
@@ -572,6 +573,7 @@ class ReportingService
                 $storeViewId,
                 $storeViewCode,
                 $watchedJobCodes,
+                $watchedEventLabels,
                 $now
             );
 
@@ -638,6 +640,7 @@ class ReportingService
      * @param int $storeViewId
      * @param string $storeViewCode
      * @param string[] $watchedJobCodes resolved once per cycle, never per store view
+     * @param string[] $watchedEventLabels convention event labels, likewise resolved once
      * @param \DateTimeImmutable $now
      * @return MetricReport|null
      */
@@ -645,13 +648,20 @@ class ReportingService
         int $storeViewId,
         string $storeViewCode,
         array $watchedJobCodes,
+        array $watchedEventLabels,
         \DateTimeImmutable $now
     ): ?MetricReport {
         // The watched set is the current model and takes precedence. The
         // per-source path below stays only for an install whose rows have not
         // been migrated yet; once the set is populated it is never consulted.
-        if ($watchedJobCodes !== []) {
-            return $this->watchedSetEvaluator->evaluate($storeViewId, $storeViewCode, $watchedJobCodes, $now);
+        if ($watchedJobCodes !== [] || $watchedEventLabels !== []) {
+            return $this->watchedSetEvaluator->evaluate(
+                $storeViewId,
+                $storeViewCode,
+                $watchedJobCodes,
+                $watchedEventLabels,
+                $now
+            );
         }
 
         $config = $this->integrationHealthConfigRepository->get($storeViewId);

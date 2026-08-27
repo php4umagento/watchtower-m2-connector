@@ -19,9 +19,9 @@ use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
  * install-level watched set.
  *
  * Without it, upgrading silently stops monitoring whatever was configured,
- * which is the worst failure a monitoring product has. Only cron_job rows can
- * carry over; the other two source types are logged rather than dropped
- * silently.
+ * which is the worst failure a monitoring product has. Cron jobs and
+ * convention events carry over; only queue_consumer cannot, and that is logged
+ * rather than dropped silently.
  */
 class MigrateIntegrationHealthSources implements DataPatchInterface
 {
@@ -51,20 +51,25 @@ class MigrateIntegrationHealthSources implements DataPatchInterface
         }
 
         $jobCodes = [];
+        $eventLabels = [];
         $unmigratable = [];
 
         foreach ($this->configRepository->getAll() as $config) {
-            if ($config->sourceType === IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB) {
-                $jobCodes[] = $config->sourceIdentifier;
-
-                continue;
-            }
-
-            $unmigratable[] = $config->sourceType . ':' . $config->sourceIdentifier;
+            match ($config->sourceType) {
+                IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB => $jobCodes[] = $config->sourceIdentifier,
+                IntegrationHealthConfig::SOURCE_TYPE_CONVENTION_EVENT => $eventLabels[] = $config->sourceIdentifier,
+                // Only queue_consumer is left, and it named a magento_operation
+                // topic the new model does not watch at all.
+                default => $unmigratable[] = $config->sourceType . ':' . $config->sourceIdentifier,
+            };
         }
 
-        if ($jobCodes !== []) {
-            $this->watchedIntegrationRepository->save([], array_values(array_unique($jobCodes)));
+        if ($jobCodes !== [] || $eventLabels !== []) {
+            $this->watchedIntegrationRepository->save(
+                [],
+                array_values(array_unique($jobCodes)),
+                array_values(array_unique($eventLabels))
+            );
         }
 
         if ($unmigratable !== []) {
