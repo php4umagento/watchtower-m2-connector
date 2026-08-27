@@ -5,6 +5,15 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.27.0] - 2026-08-27
+
+Internal cleanup with no change to what the connector monitors or reports:
+removes the per-store-view integration_health source model that the
+Integrations page replaced in 1.25.0, along with its database table.
+
+Upgrade: run `bin/magento setup:upgrade`. It drops
+`watchtower_integration_health_config`, which is no longer read.
+
 ## [1.26.0] - 2026-08-27
 
 Adds a **Custom integrations** section to **Watchtower > Integrations**, for
