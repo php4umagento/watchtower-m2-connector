@@ -268,18 +268,51 @@ Beyond the usual unit coverage:
   the unresolvable `queue_consumer` case.
 - `ObserverSafetyTest` still passes for any new observer.
 
-## Suggested delivery order
-
-Each stage is independently shippable and useful on its own.
+## Delivery order
 
 1. **Observation table plus collection.** No UI change. Starts accumulating
    cadence data immediately, which every later stage depends on and which needs
-   real elapsed time to become useful.
-2. **Discovery and attribution.** Vendor names and cadence annotations into the
-   existing picker. Fixes problems 2 and 3 without touching the data model.
-3. **Derived thresholds.** Retire the interval field. Fixes problem 1.
+   real elapsed time to become useful. **Shipped.**
+2. **Discovery and attribution.** Vendor names and cadence annotations. Fixes
+   problems 2 and 3 without touching the data model. **Shipped.**
+3. **Derived thresholds.** Fixes problem 1. **Shipped.**
 4. **Multi-select plus worst-of rollup, with migration.** Fixes problem 4.
 5. **Page rebuild with live status.** Fixes problem 5 and the secondary UI debt.
 
 Stage 1 first is deliberate: cadence data has to age before stages 3 and 4 can be
 validated against anything real.
+
+### Correction: stages 4 and 5 cannot be split
+
+This section originally claimed all five stages were independently shippable.
+That is true of 1 to 3 and false of 4 and 5, which have to land together.
+
+Stage 4 changes what the evaluator **reads**, from the per-store-view config
+row to the install-level watched set. Stage 5 changes what the admin page
+**writes**. Ship 4 alone and the existing page writes a table nothing reads;
+ship 5 alone and the new page writes a table nothing reads. Either half on its
+own is a silently broken configuration screen, which is the exact failure mode
+this redesign exists to remove.
+
+Stage 3 left one deliberate transitional inconsistency that stage 5 closes: the
+expected-max-interval field is still rendered but is no longer consulted for
+cron jobs. It still is for the other two source types, so it cannot simply be
+deleted ahead of the rebuild.
+
+### Simplification found while implementing stage 4
+
+The original sketch implied one debounce state machine per watched integration,
+rolled up afterwards. That is unnecessary. `watchtower_cron_job_observation`
+already carries each job's `last_success_at` durably, past Magento's hourly
+purge, so per-job evidence needs no per-job state of its own.
+
+The rollup is therefore: compute each watched job's raw status from its own
+observation and its own derived threshold, take the worst, and feed that single
+value into the **existing** per-store-view two-evaluation debounce, fingerprinted
+on the watched set so that changing the set re-seeds rather than carrying a
+verdict about different jobs.
+
+One thing that must not be lost in doing so: the observation table records
+successes only, so failure evidence (`STATUS_ERROR`, `STATUS_MISSED`) still has
+to come from `CronJobObserver` per watched job, or a job that runs and fails
+every time would be judged healthy on cadence alone.
