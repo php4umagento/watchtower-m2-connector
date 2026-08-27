@@ -14,10 +14,11 @@ one per store view. There is no longer an interval to enter: the connector
 measures how often each job really runs and judges it against that, which fixes
 a healthy nightly sync being reported as down for 23 hours a day.
 
-Upgrade: run `bin/magento setup:upgrade`. It adds two tables and moves existing
-cron-job sources across automatically. Sources configured as a queue consumer
-or a convention event cannot be moved and are written to the log instead, so
-re-select those under the new page.
+Upgrade: run `bin/magento setup:upgrade`. It adds two tables and moves your
+existing cron-job and convention-event sources across automatically. Only
+sources configured as a queue consumer cannot be moved; those are written to
+the log instead. Convention events keep working once migrated, but cannot yet
+be added from the new page.
 
 ## [1.24.1] - 2026-08-25
 
