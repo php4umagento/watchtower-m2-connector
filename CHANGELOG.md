@@ -5,6 +5,20 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.25.0] - 2026-08-27
+
+Replaces how `integration_health` is set up. You now tick the integrations you
+want watched under **Watchtower > Integrations**, discovered for you and named
+by the extension that ships them, as many as you like per install rather than
+one per store view. There is no longer an interval to enter: the connector
+measures how often each job really runs and judges it against that, which fixes
+a healthy nightly sync being reported as down for 23 hours a day.
+
+Upgrade: run `bin/magento setup:upgrade`. It adds two tables and moves existing
+cron-job sources across automatically. Sources configured as a queue consumer
+or a convention event cannot be moved and are written to the log instead, so
+re-select those under the new page.
+
 ## [1.24.1] - 2026-08-25
 
 Corrects the `queue_health` line in `bin/magento watchtower:status`, which
