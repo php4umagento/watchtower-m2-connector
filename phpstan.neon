@@ -1,0 +1,70 @@
+# This module's own PHPStan exclusions, kept here rather than in the Magento
+# install that runs them. That install is a disposable rsync target and is not
+# version controlled, so anything defined only there is lost on the next
+# rebuild and is unreviewable in the meantime. Mirrors what phpcs.xml already
+# does for the coding standard.
+#
+# Paths are relative to this file, so they hold wherever the module is
+# installed. The install supplies level, paths, bootstrapFiles and the Magento
+# reflection service; see its phpstan.neon.
+#
+# Every entry below justifies real code. Verify a suppression is still needed
+# before keeping it, and delete it with the code it covered.
+parameters:
+    ignoreErrors:
+        # Laminas\Http\Exception\ExceptionInterface does not declare "extends
+        # Throwable" even though every real implementation does (they all
+        # extend a concrete SPL exception class). A genuine gap in the
+        # Laminas interface, not a mistake in this module's own @throws tags.
+        -
+            message: '#PHPDoc tag @throws with type Laminas\\Http\\Client\\Exception\\ExceptionInterface is not subtype of Throwable#'
+            path: Model/Api/Client.php
+
+        # Both fall back with ?? on array keys the local @param docblock
+        # declares as always present, because the array actually comes from
+        # decoding a remote HTTP response body: the docblock states this
+        # module's own wire-contract expectation, not a compiler-enforced
+        # guarantee about what the platform will really send. Keeping the
+        # fallback is deliberate defensive coding against a malformed or
+        # future-incompatible response, not dead code.
+        -
+            message: '#Offset .[a-z_]+. on array\{.*\} on left side of \?\? always exists and is not nullable#'
+            path: Console/Command/ReportCommand.php
+        -
+            message: '#Offset .[a-z_]+. on array\{.*\} on left side of \?\? always exists and is not nullable#'
+            path: Console/Command/SyncCommand.php
+        -
+            message: '#Offset .[a-z_]+. on array\{.*\} on left side of \?\? always exists and is not nullable#'
+            path: Model/Diagnostics/SubmissionOutcomeRepository.php
+
+        # Magento\Framework\DB\Adapter\AdapterInterface::fetchOne() is typed
+        # as returning string in its own PHPDoc, but its real runtime
+        # contract (inherited from Zend_Db/Laminas Db) returns false when no
+        # row matches. The !== false checks here are load-bearing, not dead
+        # code; this is a known imprecision in the framework's own stub.
+        -
+            message: '#Else branch is unreachable because ternary operator condition is always true#'
+            path: Model/CronHealth/CronScheduleObserver.php
+
+        # Same fetchOne() stub imprecision as CronScheduleObserver.php above,
+        # here in EventCounterRepository::countFor()/droppedCountFor().
+        -
+            message: '#Else branch is unreachable because ternary operator condition is always true#'
+            path: Model/EventCounter/EventCounterRepository.php
+
+        # Same fetchOne() stub imprecision as CronScheduleObserver.php above,
+        # here in InstallEventCounterRepository::countFor() -- the
+        # admin_auth_failure counter's install-scoped counterpart to
+        # EventCounterRepository::countFor() just above.
+        -
+            message: '#Else branch is unreachable because ternary operator condition is always true#'
+            path: Model/AdminAuthFailure/InstallEventCounterRepository.php
+
+        # Same fetchOne() stub imprecision as CronScheduleObserver.php above,
+        # here in the integration_health state-poll sources.
+        -
+            message: '#Else branch is unreachable because ternary operator condition is always true#'
+            path: Model/IntegrationHealth/CronJobObserver.php
+        -
+            message: '#Else branch is unreachable because ternary operator condition is always true#'
+            path: Model/IntegrationHealth/IntegrationHealthEventRepository.php
