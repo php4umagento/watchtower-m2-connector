@@ -14,7 +14,7 @@
              module="Watchtower_Connector" sortOrder="5" parent="Watchtower_Connector::watchtower"
              action="adminhtml/system_config/edit/section/watchtower"
              resource="Watchtower_Connector::config_watchtower"/>
-        <add id="Watchtower_Connector::integration_health" title="Integration Health Sources" translate="title"
+        <add id="Watchtower_Connector::integration_health" title="Integrations" translate="title"
              module="Watchtower_Connector" sortOrder="10" parent="Watchtower_Connector::watchtower"
              action="watchtower/integrationhealth/index" resource="Watchtower_Connector::integration_health"/>
         <add id="Watchtower_Connector::diagnostics" title="Diagnostics" translate="title"

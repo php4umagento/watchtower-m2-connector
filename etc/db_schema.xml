@@ -375,6 +375,24 @@
             <column name="id"/>
         </constraint>
     </table>
+    <table name="watchtower_watched_integration" resource="default" engine="innodb"
+           comment="Install-level set of integrations the merchant chose to watch for integration_health.">
+        <column xsi:type="int" name="entry_id" unsigned="true" nullable="false" identity="true"
+                comment="Surrogate key"/>
+        <column xsi:type="varchar" name="watch_type" nullable="false" length="16"
+                comment="module (every job that module ships) or job (one job code, the advanced case)"/>
+        <column xsi:type="varchar" name="identifier" nullable="false" length="255"
+                comment="Module name or cron job code, depending on watch_type"/>
+        <column xsi:type="timestamp" name="created_at" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="When this entry was first watched"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="entry_id"/>
+        </constraint>
+        <constraint xsi:type="unique" referenceId="WATCHTOWER_WATCHED_INTEGRATION_WATCH_TYPE_IDENTIFIER">
+            <column name="watch_type"/>
+            <column name="identifier"/>
+        </constraint>
+    </table>
     <table name="watchtower_cron_job_observation" resource="default" engine="innodb"
            comment="Observed run cadence per cron job code; the basis for integration_health's derived threshold.">
         <column xsi:type="varchar" name="job_code" nullable="false" length="255"

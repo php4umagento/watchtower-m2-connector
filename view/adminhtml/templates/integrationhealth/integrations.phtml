@@ -1,0 +1,156 @@
+<?php
+/**
+ * Copyright © 2026 Watchtower. All rights reserved.
+ * Licensed under the Business Source License 1.1 (BUSL-1.1). See LICENSE.
+ */
+
+/** @var \Magento\Backend\Block\Template $block */
+/** @var \Magento\Framework\Escaper $escaper */
+/** @var \Watchtower\Connector\ViewModel\IntegrationHealth\Integrations $viewModel */
+$viewModel = $block->getData('view_model');
+
+$sections = [];
+$added = $viewModel->getAddedIntegrations();
+$magento = $viewModel->getMagentoIntegrations();
+
+if ($added !== []) {
+    $sections[] = ['title' => __('Your integrations'), 'integrations' => $added, 'open' => true];
+}
+
+if ($magento !== []) {
+    $sections[] = [
+        'title' => __('Magento\'s own scheduled jobs'),
+        'integrations' => $magento,
+        'open' => $viewModel->isMagentoSectionOpen(),
+    ];
+}
+
+$rowIndex = 0;
+?>
+<div id="watchtower_integration_health" data-mage-init='{"watchtowerIntegrationHealth": {}}'>
+    <form action="<?= $escaper->escapeUrl($viewModel->getSaveUrl()) ?>" method="post">
+        <input name="form_key" type="hidden" value="<?= $escaper->escapeHtmlAttr($viewModel->getFormKey()) ?>">
+
+        <p><?= $escaper->escapeHtml(__(
+            'Tick the integrations you want us to keep an eye on. '
+            . 'We measure how often each one normally runs and tell you when it stops. '
+            . 'Anything left unticked is not watched.'
+        )) ?></p>
+
+        <?php if ($sections === []): ?>
+            <?php $emptyMessage = __('Nothing to watch yet. No scheduled jobs or queue consumers were found.'); ?>
+            <p><?= $escaper->escapeHtml($emptyMessage) ?></p>
+        <?php endif; ?>
+
+        <?php foreach ($sections as $section): ?>
+            <details class="details admin__collapsible-block-wrapper"<?= $section['open'] ? ' open' : '' ?>>
+                <summary class="details-summary admin__collapsible-title">
+                    <span><?= $escaper->escapeHtml($section['title']) ?></span>
+                </summary>
+                <div class="details-content admin__fieldset">
+                    <?php foreach ($section['integrations'] as $integration): ?>
+                        <?php $rowIndex++; ?>
+                        <div class="admin__fieldset-wrapper watchtower-integration" data-role="integration">
+                            <?php if ($viewModel->isSelectableAsWhole($integration)): ?>
+                                <div class="admin__field admin__field-option">
+                                    <input type="checkbox"
+                                           class="admin__control-checkbox"
+                                           id="watchtower_module_<?= (int) $rowIndex ?>"
+                                           name="watched_modules[]"
+                                           value="<?= $escaper->escapeHtmlAttr($integration->moduleName) ?>"
+                                           data-role="integration-toggle"
+                                        <?= $viewModel->isWatched($integration) ? ' checked' : '' ?>>
+                                    <label class="admin__field-label"
+                                           for="watchtower_module_<?= (int) $rowIndex ?>">
+                                        <strong><?= $escaper->escapeHtml($integration->vendorLabel) ?></strong>
+                                        <?php if ($integration->packageName !== null): ?>
+                                            <span class="watchtower-integration-package">
+                                                <?= $escaper->escapeHtml($integration->packageName) ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="watchtower-integration-package">
+                                                <?= $escaper->escapeHtml($integration->moduleName) ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </label>
+                                </div>
+                            <?php else: ?>
+                                <div class="admin__field">
+                                    <strong><?= $escaper->escapeHtml($integration->vendorLabel) ?></strong>
+                                </div>
+                            <?php endif; ?>
+
+                            <div class="watchtower-integration-meta">
+                                <?= $escaper->escapeHtml($viewModel->getContentsSummary($integration)) ?>
+                            </div>
+
+                            <?php foreach ($viewModel->getNotes($integration) as $note): ?>
+                                <div class="watchtower-integration-note">
+                                    <?= $escaper->escapeHtml($note) ?>
+                                </div>
+                            <?php endforeach; ?>
+
+                            <?php if ($integration->consumerNames !== []): ?>
+                                <div class="watchtower-integration-meta">
+                                    <?= $escaper->escapeHtml(__(
+                                        'Queue consumers watched with this integration: %1',
+                                        $viewModel->getConsumerList($integration)
+                                    )) ?>
+                                </div>
+                            <?php endif; ?>
+
+                            <?php if ($integration->jobs !== []): ?>
+                                <details class="details admin__collapsible-block-wrapper"
+                                    <?= $viewModel->isDetailOpen($integration) ? ' open' : '' ?>>
+                                    <summary class="details-summary admin__collapsible-title">
+                                        <span><?= $escaper->escapeHtml(__('Choose individual jobs')) ?></span>
+                                    </summary>
+                                    <div class="details-content">
+                                        <table class="data-grid">
+                                            <tbody>
+                                            <?php foreach ($integration->jobs as $job): ?>
+                                                <?php $rowIndex++; ?>
+                                                <tr>
+                                                    <td class="data-grid-td">
+                                                        <input type="checkbox"
+                                                               class="admin__control-checkbox"
+                                                               id="watchtower_job_<?= (int) $rowIndex ?>"
+                                                               name="watched_jobs[]"
+                                                               value="<?= $escaper->escapeHtmlAttr($job->jobCode) ?>"
+                                                               data-role="job-toggle"
+                                                            <?= $viewModel->isJobWatched($job) ? ' checked' : '' ?>>
+                                                        <label for="watchtower_job_<?= (int) $rowIndex ?>">
+                                                            <?= $escaper->escapeHtml($job->jobCode) ?>
+                                                        </label>
+                                                    </td>
+                                                    <td class="data-grid-td">
+                                                        <?= $escaper->escapeHtml($viewModel->getCadenceLabel($job)) ?>
+                                                    </td>
+                                                    <td class="data-grid-td">
+                                                        <?php $warning = $viewModel->getJobWarning($job); ?>
+                                                        <?php if ($warning !== null): ?>
+                                                            <span class="watchtower-integration-note">
+                                                                <?= $escaper->escapeHtml($warning) ?>
+                                                            </span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </details>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </details>
+        <?php endforeach; ?>
+
+        <div class="admin__field">
+            <button type="submit" class="action-primary" data-role="save">
+                <span><?= $escaper->escapeHtml(__('Save')) ?></span>
+            </button>
+        </div>
+    </form>
+</div>

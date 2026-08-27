@@ -1,0 +1,314 @@
+<?php
+/**
+ * Copyright © 2026 Watchtower. All rights reserved.
+ * Licensed under the Business Source License 1.1 (BUSL-1.1). See LICENSE.
+ */
+
+declare(strict_types=1);
+
+namespace Watchtower\Connector\ViewModel\IntegrationHealth;
+
+use Magento\Backend\Model\UrlInterface;
+use Magento\Framework\Data\Form\FormKey;
+use Magento\Framework\Phrase;
+use Magento\Framework\View\Element\Block\ArgumentInterface;
+use Watchtower\Connector\Model\IntegrationHealth\DiscoveredIntegration;
+use Watchtower\Connector\Model\IntegrationHealth\DiscoveredJob;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationDiscovery;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
+
+/**
+ * Backs the "which integrations should we watch" page.
+ *
+ * A view model rather than a block so every decision the page makes about
+ * wording, ordering and tick state is reachable from a plain unit test. The
+ * template does presentation only; it holds no logic of its own.
+ */
+class Integrations implements ArgumentInterface
+{
+    /**
+     * @var DiscoveredIntegration[]|null
+     */
+    private ?array $discovered = null;
+
+    /**
+     * @var array<string,true>|null
+     */
+    private ?array $watchedModules = null;
+
+    /**
+     * @var array<string,true>|null
+     */
+    private ?array $watchedJobCodes = null;
+
+    /**
+     * @param IntegrationDiscovery $discovery
+     * @param WatchedIntegrationRepository $watchedRepository
+     * @param CadenceDescriber $cadenceDescriber
+     * @param UrlInterface $url
+     * @param FormKey $formKey
+     */
+    public function __construct(
+        private readonly IntegrationDiscovery $discovery,
+        private readonly WatchedIntegrationRepository $watchedRepository,
+        private readonly CadenceDescriber $cadenceDescriber,
+        private readonly UrlInterface $url,
+        private readonly FormKey $formKey
+    ) {
+    }
+
+    /**
+     * The merchant's own extensions, plus anything scheduled that no installed module declares.
+     *
+     * Kept in discovery's order rather than re-sorted here: it already ranks
+     * third-party first so an ERP sync is not buried under core housekeeping.
+     *
+     * @return DiscoveredIntegration[]
+     */
+    public function getAddedIntegrations(): array
+    {
+        return array_values(array_filter(
+            $this->integrations(),
+            static fn (DiscoveredIntegration $integration): bool => $integration->isThirdParty
+        ));
+    }
+
+    /**
+     * Everything Magento itself schedules, offered but ranked last.
+     *
+     * @return DiscoveredIntegration[]
+     */
+    public function getMagentoIntegrations(): array
+    {
+        return array_values(array_filter(
+            $this->integrations(),
+            static fn (DiscoveredIntegration $integration): bool => !$integration->isThirdParty
+        ));
+    }
+
+    /**
+     * Whether this whole integration is being watched.
+     *
+     * @param DiscoveredIntegration $integration
+     * @return bool
+     */
+    public function isWatched(DiscoveredIntegration $integration): bool
+    {
+        return isset($this->watchedModules()[$integration->moduleName]);
+    }
+
+    /**
+     * Whether this one job is being watched on its own.
+     *
+     * @param DiscoveredJob $job
+     * @return bool
+     */
+    public function isJobWatched(DiscoveredJob $job): bool
+    {
+        return isset($this->watchedJobCodes()[$job->jobCode]);
+    }
+
+    /**
+     * Whether an integration can be ticked as a single unit.
+     *
+     * The unattributed bucket cannot: it is not one integration but every
+     * scheduled job no installed module claims, so there is no module name to
+     * store and nothing the merchant would recognize as "all of it". Its jobs
+     * are still individually selectable.
+     *
+     * @param DiscoveredIntegration $integration
+     * @return bool
+     */
+    public function isSelectableAsWhole(DiscoveredIntegration $integration): bool
+    {
+        return $integration->moduleName !== IntegrationDiscovery::UNATTRIBUTED_MODULE;
+    }
+
+    /**
+     * Whether the individual-job list should start expanded.
+     *
+     * Open when the merchant has picked individual jobs here, so a choice they
+     * made is never hidden behind a click, and open for the unattributed
+     * bucket, whose jobs are the only thing selectable in it.
+     *
+     * @param DiscoveredIntegration $integration
+     * @return bool
+     */
+    public function isDetailOpen(DiscoveredIntegration $integration): bool
+    {
+        if (!$this->isSelectableAsWhole($integration)) {
+            return true;
+        }
+
+        foreach ($integration->jobs as $job) {
+            if ($this->isJobWatched($job)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether Magento's own jobs should start expanded.
+     *
+     * @return bool
+     */
+    public function isMagentoSectionOpen(): bool
+    {
+        foreach ($this->getMagentoIntegrations() as $integration) {
+            if ($this->isWatched($integration) || $this->isDetailOpen($integration)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * What this integration schedules and consumes, in plain terms.
+     *
+     * @param DiscoveredIntegration $integration
+     * @return string
+     */
+    public function getContentsSummary(DiscoveredIntegration $integration): string
+    {
+        $parts = [];
+        $jobCount = count($integration->jobs);
+        $consumerCount = count($integration->consumerNames);
+
+        if ($jobCount > 0) {
+            $parts[] = (string) ($jobCount === 1
+                ? __('1 scheduled job')
+                : __('%1 scheduled jobs', $jobCount));
+        }
+
+        if ($consumerCount > 0) {
+            $parts[] = (string) ($consumerCount === 1
+                ? __('1 queue consumer')
+                : __('%1 queue consumers', $consumerCount));
+        }
+
+        return implode(', ', $parts);
+    }
+
+    /**
+     * The caveats to show against the integration as a whole.
+     *
+     * @param DiscoveredIntegration $integration
+     * @return Phrase[]
+     */
+    public function getNotes(DiscoveredIntegration $integration): array
+    {
+        $notes = [];
+
+        if (!$integration->hasConfidentCadence()) {
+            $notes[] = __('Learning cadence. You can select it now and we will start alerting once we know it.');
+        }
+
+        if ($integration->isErratic()) {
+            $notes[] = __('Runs irregularly, alerting may be unreliable.');
+        }
+
+        return $notes;
+    }
+
+    /**
+     * How often this job was measured running.
+     *
+     * @param DiscoveredJob $job
+     * @return Phrase
+     */
+    public function getCadenceLabel(DiscoveredJob $job): Phrase
+    {
+        return $this->cadenceDescriber->describe($job->cadence);
+    }
+
+    /**
+     * The caveat to show beside this job, or null when it needs none.
+     *
+     * @param DiscoveredJob $job
+     * @return Phrase|null
+     */
+    public function getJobWarning(DiscoveredJob $job): ?Phrase
+    {
+        return $this->cadenceDescriber->warning($job->cadence);
+    }
+
+    /**
+     * The consumers watched alongside this integration, or an empty string when it declares none.
+     *
+     * Listed rather than made selectable: consumers belong to the module that
+     * handles them, so they are watched with it and there is nothing useful to
+     * tick separately.
+     *
+     * @param DiscoveredIntegration $integration
+     * @return string
+     */
+    public function getConsumerList(DiscoveredIntegration $integration): string
+    {
+        return implode(', ', $integration->consumerNames);
+    }
+
+    /**
+     * Where the page-level Save posts the whole watched set.
+     *
+     * @return string
+     */
+    public function getSaveUrl(): string
+    {
+        return $this->url->getUrl('watchtower/integrationhealth/save');
+    }
+
+    /**
+     * The admin form key this page's POST must carry.
+     *
+     * @return string
+     */
+    public function getFormKey(): string
+    {
+        return $this->formKey->getFormKey();
+    }
+
+    /**
+     * Every integration this install offers, read once per render.
+     *
+     * @return DiscoveredIntegration[]
+     */
+    private function integrations(): array
+    {
+        if ($this->discovered === null) {
+            $this->discovered = $this->discovery->discover();
+        }
+
+        return $this->discovered;
+    }
+
+    /**
+     * The watched module names as a lookup, read once per render.
+     *
+     * @return array<string,true>
+     */
+    private function watchedModules(): array
+    {
+        if ($this->watchedModules === null) {
+            $this->watchedModules = array_fill_keys($this->watchedRepository->watchedModules(), true);
+        }
+
+        return $this->watchedModules;
+    }
+
+    /**
+     * The individually watched job codes as a lookup, read once per render.
+     *
+     * @return array<string,true>
+     */
+    private function watchedJobCodes(): array
+    {
+        if ($this->watchedJobCodes === null) {
+            $this->watchedJobCodes = array_fill_keys($this->watchedRepository->watchedJobCodes(), true);
+        }
+
+        return $this->watchedJobCodes;
+    }
+}

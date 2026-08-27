@@ -30,6 +30,8 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigReposito
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\Observation;
 use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedSetEvaluator;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 use Watchtower\Connector\Model\QueueHealth\Evaluator as QueueHealthEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
@@ -114,6 +116,8 @@ class ReportingService
      * @param QueueHealthEvaluator $queueHealthEvaluator
      * @param JobRunObservationRepository $jobRunObservationRepository measured run history behind the threshold
      * @param CadenceEstimator $cadenceEstimator
+     * @param WatchedJobResolver $watchedJobResolver expands the merchant's watched set to job codes
+     * @param WatchedSetEvaluator $watchedSetEvaluator rolls that set up to one status per store view
      */
     public function __construct(
         private readonly Config $config,
@@ -148,6 +152,8 @@ class ReportingService
         private readonly QueueHealthEvaluator $queueHealthEvaluator,
         private readonly JobRunObservationRepository $jobRunObservationRepository,
         private readonly CadenceEstimator $cadenceEstimator,
+        private readonly WatchedJobResolver $watchedJobResolver,
+        private readonly WatchedSetEvaluator $watchedSetEvaluator,
     ) {
     }
 
@@ -498,6 +504,12 @@ class ReportingService
         $windowStart = $evaluatedHourStart;
         $windowEnd = $evaluatedHourStart->modify('+1 hour');
 
+        // Resolved once for the whole cycle, never inside the store view loop.
+        // The watched set is install-level, and expanding it walks every
+        // declared cron job, so resolving per store view would turn a fixed
+        // cost into one multiplied by store view count.
+        $watchedJobCodes = $this->watchedJobResolver->resolve();
+
         $readersByCategory = [
             HistorySeeder::CATEGORY_BASKET_QUOTE => $this->basketQuoteReader,
             HistorySeeder::CATEGORY_CHECKOUT => $this->checkoutReader,
@@ -556,7 +568,12 @@ class ReportingService
                 $now
             );
 
-            $integrationHealthReport = $this->integrationHealthReportFor($storeViewId, $storeViewCode, $now);
+            $integrationHealthReport = $this->integrationHealthReportFor(
+                $storeViewId,
+                $storeViewCode,
+                $watchedJobCodes,
+                $now
+            );
 
             if ($integrationHealthReport !== null) {
                 $reports[] = $integrationHealthReport;
@@ -620,14 +637,23 @@ class ReportingService
      *
      * @param int $storeViewId
      * @param string $storeViewCode
+     * @param string[] $watchedJobCodes resolved once per cycle, never per store view
      * @param \DateTimeImmutable $now
      * @return MetricReport|null
      */
     private function integrationHealthReportFor(
         int $storeViewId,
         string $storeViewCode,
+        array $watchedJobCodes,
         \DateTimeImmutable $now
     ): ?MetricReport {
+        // The watched set is the current model and takes precedence. The
+        // per-source path below stays only for an install whose rows have not
+        // been migrated yet; once the set is populated it is never consulted.
+        if ($watchedJobCodes !== []) {
+            return $this->watchedSetEvaluator->evaluate($storeViewId, $storeViewCode, $watchedJobCodes, $now);
+        }
+
         $config = $this->integrationHealthConfigRepository->get($storeViewId);
         // An unreadable source means "we can't tell right now", so it falls back to
         // the retirement heartbeat rather than a fabricated DOWN observation.

@@ -10,9 +10,15 @@
     <update handle="formkey"/>
     <body>
         <referenceContainer name="content">
-            <block class="Watchtower\Connector\Block\Adminhtml\IntegrationHealth\Sources"
-                   name="watchtower.integrationhealth.sources"
-                   template="Watchtower_Connector::integrationhealth/sources.phtml"/>
+            <block class="Magento\Backend\Block\Template"
+                   name="watchtower.integrationhealth.integrations"
+                   template="Watchtower_Connector::integrationhealth/integrations.phtml">
+                <arguments>
+                    <argument name="view_model" xsi:type="object">
+                        Watchtower\Connector\ViewModel\IntegrationHealth\Integrations
+                    </argument>
+                </arguments>
+            </block>
         </referenceContainer>
     </body>
 </page>

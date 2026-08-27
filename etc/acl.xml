@@ -19,7 +19,7 @@
                     </resource>
                 </resource>
                 <resource id="Watchtower_Connector::watchtower" title="Watchtower" translate="title" sortOrder="65">
-                    <resource id="Watchtower_Connector::integration_health" title="Integration Health Sources"
+                    <resource id="Watchtower_Connector::integration_health" title="Integrations"
                               translate="title" sortOrder="10"/>
                     <resource id="Watchtower_Connector::diagnostics" title="Diagnostics"
                               translate="title" sortOrder="20"/>

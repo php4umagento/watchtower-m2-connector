@@ -10,17 +10,19 @@ namespace Watchtower\Connector\Controller\Adminhtml\IntegrationHealth;
 
 use Magento\Backend\App\Action;
 use Magento\Backend\App\Action\Context;
+use Magento\Backend\Model\View\Result\Redirect;
 use Magento\Framework\App\Action\HttpPostActionInterface;
-use Magento\Framework\Controller\Result\Json;
-use Magento\Framework\Controller\Result\JsonFactory;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfig;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigValidator;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationDiscovery;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
 
 /**
- * Persists one store view's integration_health source from the picker.
- * Returns every validation error at once so the row can render them all
- * inline.
+ * Replaces the whole watched set from one page-level submit.
+ *
+ * The submitted set is intersected with what discovery currently offers
+ * rather than trusted. That is what keeps a hand-rolled POST from storing the
+ * connector's own jobs (discovery excludes them, so watching them would make
+ * the signal its own source) or an arbitrary string that would then sit in
+ * the watched set forever, matching nothing.
  */
 class Save extends Action implements HttpPostActionInterface
 {
@@ -28,51 +30,96 @@ class Save extends Action implements HttpPostActionInterface
 
     /**
      * @param Context $context
-     * @param IntegrationHealthConfigValidator $validator
-     * @param IntegrationHealthConfigRepository $configRepository
-     * @param JsonFactory $resultJsonFactory
+     * @param IntegrationDiscovery $discovery
+     * @param WatchedIntegrationRepository $watchedRepository
      */
     public function __construct(
         Context $context,
-        private readonly IntegrationHealthConfigValidator $validator,
-        private readonly IntegrationHealthConfigRepository $configRepository,
-        private readonly JsonFactory $resultJsonFactory
+        private readonly IntegrationDiscovery $discovery,
+        private readonly WatchedIntegrationRepository $watchedRepository
     ) {
         parent::__construct($context);
     }
 
     /**
-     * Validates the submitted row and upserts it when clean.
+     * Persists the ticked integrations and job codes.
      *
-     * @return Json
+     * @return Redirect
      */
-    public function execute(): Json
+    public function execute(): Redirect
     {
-        $result = $this->resultJsonFactory->create();
+        $submittedModules = $this->submitted('watched_modules');
+        $submittedJobCodes = $this->submitted('watched_jobs');
 
-        $storeViewId = (int) $this->getRequest()->getParam('store_view_id');
-        $sourceType = (string) $this->getRequest()->getParam('source_type', '');
-        $sourceIdentifier = trim((string) $this->getRequest()->getParam('source_identifier', ''));
-        $expectedMaxIntervalMinutes = (int) $this->getRequest()->getParam('expected_max_interval_minutes');
+        [$offeredModules, $offeredJobCodes] = $this->offered();
 
-        $errors = $this->validator->validate(
-            $storeViewId,
-            $sourceType,
-            $sourceIdentifier,
-            $expectedMaxIntervalMinutes
-        );
+        $modules = array_values(array_intersect($submittedModules, $offeredModules));
+        $jobCodes = array_values(array_intersect($submittedJobCodes, $offeredJobCodes));
 
-        if ($errors !== []) {
-            return $result->setData(['success' => false, 'errors' => $errors]);
+        $this->watchedRepository->save($modules, $jobCodes);
+
+        $this->messageManager->addSuccessMessage((string) __('Saved. We are now watching your selected integrations.'));
+
+        $ignored = count($submittedModules) - count($modules) + count($submittedJobCodes) - count($jobCodes);
+
+        if ($ignored > 0) {
+            $this->messageManager->addWarningMessage((string) ($ignored === 1
+                ? __('One selection was ignored because it is no longer installed.')
+                : __('%1 selections were ignored because they are no longer installed.', $ignored)));
         }
 
-        $this->configRepository->save(new IntegrationHealthConfig(
-            storeViewId: $storeViewId,
-            sourceType: $sourceType,
-            sourceIdentifier: $sourceIdentifier,
-            expectedMaxIntervalMinutes: $expectedMaxIntervalMinutes,
-        ));
+        /** @var Redirect $redirect */
+        $redirect = $this->resultRedirectFactory->create();
+        $redirect->setPath('watchtower/integrationhealth/index');
 
-        return $result->setData(['success' => true]);
+        return $redirect;
+    }
+
+    /**
+     * The submitted values for one checkbox group, as a de-duplicated list of strings.
+     *
+     * @param string $param
+     * @return string[]
+     */
+    private function submitted(string $param): array
+    {
+        $values = $this->getRequest()->getParam($param, []);
+
+        if (!is_array($values)) {
+            return [];
+        }
+
+        $strings = [];
+
+        foreach ($values as $value) {
+            if (is_string($value) && $value !== '') {
+                $strings[] = $value;
+            }
+        }
+
+        return array_values(array_unique($strings));
+    }
+
+    /**
+     * Everything currently selectable: module names, and job codes.
+     *
+     * @return array{0: string[], 1: string[]}
+     */
+    private function offered(): array
+    {
+        $modules = [];
+        $jobCodes = [];
+
+        foreach ($this->discovery->discover() as $integration) {
+            if ($integration->moduleName !== IntegrationDiscovery::UNATTRIBUTED_MODULE) {
+                $modules[] = $integration->moduleName;
+            }
+
+            foreach ($integration->jobs as $job) {
+                $jobCodes[] = $job->jobCode;
+            }
+        }
+
+        return [$modules, $jobCodes];
     }
 }

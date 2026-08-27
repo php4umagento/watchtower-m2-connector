@@ -40,6 +40,8 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthState;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\Observation;
 use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedSetEvaluator;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 use Watchtower\Connector\Model\AdminAuthFailure\Evaluator as AdminAuthFailureEvaluator;
 use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
@@ -2096,6 +2098,8 @@ class ReportingServiceTest extends TestCase
         ?ConnectorVersionCheckService $connectorVersionCheckService = null,
         ?ConnectorVersionStateRepository $connectorVersionStateRepository = null,
         ?JobRunObservationRepository $jobRunObservationRepository = null,
+        ?WatchedJobResolver $watchedJobResolver = null,
+        ?WatchedSetEvaluator $watchedSetEvaluator = null,
     ): ReportingService {
         if ($storeManager === null) {
             $storeManager = $this->createStub(StoreManagerInterface::class);
@@ -2188,6 +2192,11 @@ class ReportingServiceTest extends TestCase
             $queueHealthEvaluator,
             $jobRunObservationRepository ?? $this->createStub(JobRunObservationRepository::class),
             new CadenceEstimator(),
+            // A default stub resolves to an empty watched set, so these tests
+            // keep exercising the pre-migration per-source path unless one
+            // explicitly opts in to the rollup.
+            $watchedJobResolver ?? $this->createStub(WatchedJobResolver::class),
+            $watchedSetEvaluator ?? $this->createStub(WatchedSetEvaluator::class),
         );
     }
 

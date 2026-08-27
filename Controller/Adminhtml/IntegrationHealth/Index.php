@@ -15,8 +15,7 @@ use Magento\Framework\App\Action\HttpGetActionInterface;
 use Magento\Framework\View\Result\PageFactory;
 
 /**
- * Renders the integration_health source picker: one row per live store view,
- * each choosing at most one source for the integration_health signal.
+ * Renders the checklist of integrations this install can watch.
  */
 class Index extends Action implements HttpGetActionInterface
 {
@@ -34,7 +33,7 @@ class Index extends Action implements HttpGetActionInterface
     }
 
     /**
-     * Builds the picker page.
+     * Builds the page.
      *
      * @return Page
      */
@@ -43,7 +42,7 @@ class Index extends Action implements HttpGetActionInterface
         /** @var Page $resultPage */
         $resultPage = $this->resultPageFactory->create();
         $resultPage->setActiveMenu('Watchtower_Connector::integration_health');
-        $resultPage->getConfig()->getTitle()->prepend((string) __('Integration Health Sources'));
+        $resultPage->getConfig()->getTitle()->prepend((string) __('Integrations'));
 
         return $resultPage;
     }
