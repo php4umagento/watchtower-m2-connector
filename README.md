@@ -22,9 +22,11 @@ Tracked signals:
 - **`checkout`**, **`basket_quote`**, **`customer_account`** — rate-based
   signals comparing this hour's activity against your store's own historical
   baseline for the same hour of day.
-- **`integration_health`** — an optional, per-store-view signal for a
-  third-party integration (a cron job, a queue consumer, or a custom
-  convention event you emit) — configured per store view in the admin.
+- **`integration_health`** — an optional signal for the integrations you
+  choose to watch. The connector finds the scheduled jobs your store runs,
+  groups them under the extension that ships them, and measures how often each
+  really runs so there is no interval to configure. Integrations that run no
+  cron at all can emit a convention event instead.
 
 ## Requirements
 
@@ -95,11 +97,13 @@ exist for on-demand checks and troubleshooting.
 
 Under the **Watchtower** menu:
 
-- **Integration Health Sources** — per-store-view picker for the
-  `integration_health` signal's source: a cron job, a queue consumer/bulk
-  operation, or a custom convention event. A store view left unconfigured
-  simply isn't evaluated for this signal — every other signal keeps working
-  regardless.
+- **Integrations** — pick which integrations `integration_health` watches,
+  discovered for you and named by the extension that ships them, as many as
+  you like per install. No interval to enter: the window comes from each job's
+  measured cadence. Integrations that run no cron appear under **Custom
+  integrations**, listing the `watchtower_integration_health` events the
+  connector has actually received. Nothing selected means the signal is not
+  evaluated, and every other signal keeps working regardless.
 - **Diagnostics** — connection state, last successful submission, buffered
   report backlog, dropped-event count, every live store view's per-signal
   status and sequence number, and the most recent submission outcomes
@@ -142,7 +146,7 @@ doesn't necessarily mean every other signal's detection logic changed too:
 
 - `cron_health` — `Model/CronHealth/Evaluator::RULESET_VERSION`
 - `checkout` / `basket_quote` / `customer_account` — `Model/RateSignal/DispersionEvaluator::RULESET_VERSION`
-- `integration_health` — `Model/IntegrationHealth/Evaluator::RULESET_VERSION`
+- `integration_health` — `Model/IntegrationHealth/WatchedSetEvaluator::RULESET_VERSION`
 
 Each is reported per-signal on every submitted report, so the platform
 always knows exactly which baseline logic produced a given status — a
