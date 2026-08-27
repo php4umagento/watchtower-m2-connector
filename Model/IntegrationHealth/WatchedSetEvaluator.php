@@ -106,6 +106,41 @@ class WatchedSetEvaluator
     }
 
     /**
+     * Keeps a previously-reported store view alive after its watched set is emptied.
+     *
+     * Null when it never reported at all. The platform's staleness sweep has no
+     * concept of a deliberately retired signal, so going silent would alert
+     * forever. An anomalous status is downgraded first, since a set nobody
+     * watches can no longer be observed to recover.
+     *
+     * @param int $storeViewId
+     * @param string $storeViewCode
+     * @param \DateTimeImmutable $now
+     * @return MetricReport|null
+     */
+    public function heartbeatRetiredIfPreviouslyReported(
+        int $storeViewId,
+        string $storeViewCode,
+        \DateTimeImmutable $now
+    ): ?MetricReport {
+        $state = $this->repository->get($storeViewId);
+
+        if ($state->confirmedStatus === null) {
+            return null;
+        }
+
+        $retiredStatus = $this->isAnomalous($state->confirmedStatus)
+            ? SignalStatus::InsufficientData
+            : $state->confirmedStatus;
+
+        // Fingerprint cleared so re-selecting the same set later re-seeds
+        // rather than resuming on a verdict about a since-retired one.
+        $this->save($storeViewId, null, $retiredStatus, $state->sequenceNumber + 1, null);
+
+        return $this->report($storeViewCode, $retiredStatus, $state->sequenceNumber, $now);
+    }
+
+    /**
      * The watched jobs currently judged unhealthy, for watchtower:status only.
      *
      * Never crosses the wire: the platform gets one rolled-up status, so this
@@ -341,7 +376,7 @@ class WatchedSetEvaluator
      * @param SignalStatus|null $pendingStatus
      * @param SignalStatus|null $confirmedStatus
      * @param int $sequenceNumber
-     * @param string $fingerprint
+     * @param string|null $fingerprint null once the watched set is emptied
      * @return void
      */
     private function save(
@@ -349,7 +384,7 @@ class WatchedSetEvaluator
         ?SignalStatus $pendingStatus,
         ?SignalStatus $confirmedStatus,
         int $sequenceNumber,
-        string $fingerprint
+        ?string $fingerprint
     ): void {
         $this->repository->save(new IntegrationHealthState(
             storeViewId: $storeViewId,

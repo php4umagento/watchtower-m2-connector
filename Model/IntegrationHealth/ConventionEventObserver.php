@@ -18,7 +18,7 @@ use Watchtower\Connector\Model\Config;
 
 /**
  * Records each dispatch of the watchtower_integration_health convention event
- * locally, so ConventionEventReader can answer "when did this integration last
+ * locally, so IntegrationHealthEventRepository can answer "when did this last
  * report ok/failed" durably.
  *
  * Event data contract: 'status' ('ok'|'failed'), 'integration' (the label a

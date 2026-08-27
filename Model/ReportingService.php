@@ -17,19 +17,9 @@ use Watchtower\Connector\Model\AdminAuthFailure\Evaluator as AdminAuthFailureEva
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
-use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
-use Watchtower\Connector\Model\CronJobObservation\JobRunObservationRepository;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
 use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\IndexerHealth\Evaluator as IndexerHealthEvaluator;
-use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
-use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
-use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfig;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
-use Watchtower\Connector\Model\IntegrationHealth\Observation;
-use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedSetEvaluator;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
@@ -100,13 +90,6 @@ class ReportingService
      * @param HistorySeeder $historySeeder
      * @param SeedCoverageRepository $seedCoverageRepository persists seedIfNeverSeeded()'s outcome so the
      *     diagnostics page/CLI can read it back without re-seeding
-     * @param IntegrationHealthConfigRepository $integrationHealthConfigRepository
-     * @param IntegrationHealthEvaluator $integrationHealthEvaluator
-     * @param IntegrationHealthStateRepository $integrationHealthStateRepository used only by the evidence
-     *     snapshot; the evaluator owns every other write to that table
-     * @param CronJobObserver $cronJobObserver
-     * @param QueueConsumerObserver $queueConsumerObserver
-     * @param ConventionEventReader $conventionEventReader
      * @param OrganizationStateRepository $organizationStateRepository
      * @param LoggerInterface $logger
      * @param SubmissionOutcomeRepository $submissionOutcomeRepository
@@ -114,8 +97,6 @@ class ReportingService
      * @param ConnectorVersionStateRepository $connectorVersionStateRepository
      * @param IndexerHealthEvaluator $indexerHealthEvaluator
      * @param QueueHealthEvaluator $queueHealthEvaluator
-     * @param JobRunObservationRepository $jobRunObservationRepository measured run history behind the threshold
-     * @param CadenceEstimator $cadenceEstimator
      * @param WatchedJobResolver $watchedJobResolver expands the merchant's watched set to job codes
      * @param WatchedSetEvaluator $watchedSetEvaluator rolls that set up to one status per store view
      */
@@ -134,12 +115,6 @@ class ReportingService
         private readonly CheckoutFailureEvaluator $checkoutFailureEvaluator,
         private readonly HistorySeeder $historySeeder,
         private readonly SeedCoverageRepository $seedCoverageRepository,
-        private readonly IntegrationHealthConfigRepository $integrationHealthConfigRepository,
-        private readonly IntegrationHealthEvaluator $integrationHealthEvaluator,
-        private readonly IntegrationHealthStateRepository $integrationHealthStateRepository,
-        private readonly CronJobObserver $cronJobObserver,
-        private readonly QueueConsumerObserver $queueConsumerObserver,
-        private readonly ConventionEventReader $conventionEventReader,
         private readonly OrganizationStateRepository $organizationStateRepository,
         private readonly LoggerInterface $logger,
         private readonly SubmissionOutcomeRepository $submissionOutcomeRepository,
@@ -150,42 +125,9 @@ class ReportingService
         // parameter mid-list silently shifts a dozen unrelated arguments.
         private readonly IndexerHealthEvaluator $indexerHealthEvaluator,
         private readonly QueueHealthEvaluator $queueHealthEvaluator,
-        private readonly JobRunObservationRepository $jobRunObservationRepository,
-        private readonly CadenceEstimator $cadenceEstimator,
         private readonly WatchedJobResolver $watchedJobResolver,
         private readonly WatchedSetEvaluator $watchedSetEvaluator,
     ) {
-    }
-
-    /**
-     * How long this source's last success may go unrenewed before it is stalled.
-     *
-     * Derived from what the job has actually been measured doing rather than
-     * from a hand-typed interval. The retired field defaulted to 60 minutes,
-     * which put a healthy nightly ERP sync in SevereDrop for 23 hours out of
-     * every 24, and no merchant could reasonably be expected to get that
-     * number right for every integration they run.
-     *
-     * Null means the cadence is not established yet, which the evaluator
-     * reports as INSUFFICIENT_DATA rather than guessing a window.
-     *
-     * Only cron jobs are measurable this way. A queue consumer's activity is
-     * read from magento_operation and a convention event's from the
-     * merchant's own dispatches, neither of which the run recorder watches,
-     * so both keep the interval their configuration already carries.
-     *
-     * @param IntegrationHealthConfig $config
-     * @return int|null
-     */
-    private function thresholdSecondsFor(IntegrationHealthConfig $config): ?int
-    {
-        if ($config->sourceType !== IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB) {
-            return $config->expectedMaxIntervalMinutes * 60;
-        }
-
-        return $this->cadenceEstimator
-            ->estimate($this->jobRunObservationRepository->get($config->sourceIdentifier))
-            ->thresholdSeconds;
     }
 
     /**
@@ -377,71 +319,6 @@ class ReportingService
             'organizationPaused' => false,
             'belowMinimumVersion' => false,
         ];
-    }
-
-    /**
-     * Captures integration_health success/failure evidence without evaluating anything.
-     *
-     * Magento purges succeeded cron_schedule rows about an hour after they
-     * finish, so a source observed only once per evaluation cycle can have its
-     * single daily success vanish between two ticks and be reported DOWN while
-     * perfectly healthy. Cron\ReportJob therefore calls this every 5-minute
-     * tick; it writes only the two evidence columns and never produces a
-     * report, advances a sequence number, or touches a status.
-     *
-     * @param \DateTimeImmutable $now
-     * @return void
-     */
-    public function snapshotIntegrationHealthEvidence(\DateTimeImmutable $now): void
-    {
-        if (!$this->config->isConfigured() || !$this->config->isEnabled()) {
-            return;
-        }
-
-        foreach ($this->liveStoreViewResolver->all() as $store) {
-            $storeViewId = (int) $store->getId();
-            $config = $this->integrationHealthConfigRepository->get($storeViewId);
-
-            if ($config === null) {
-                continue;
-            }
-
-            $state = $this->integrationHealthStateRepository->get($storeViewId);
-
-            // A source change must be re-seeded by the evaluator, not have fresh
-            // evidence written under the previous source's fingerprint.
-            if (!$state->describesSource($config->sourceType, $config->sourceIdentifier)) {
-                continue;
-            }
-
-            $observation = $this->observeConfiguredSource($config, $now);
-
-            if ($observation === null) {
-                continue;
-            }
-
-            $this->integrationHealthStateRepository->saveObservedEvidence(
-                $storeViewId,
-                $this->later($observation->latestSuccessAt, $state->lastSuccessAt),
-                $this->later($observation->latestFailureAt, $state->lastFailureAt)
-            );
-        }
-    }
-
-    /**
-     * The later of two nullable timestamps, so persisted evidence only ever moves forward.
-     *
-     * @param \DateTimeImmutable|null $observed
-     * @param \DateTimeImmutable|null $stored
-     * @return \DateTimeImmutable|null
-     */
-    private function later(?\DateTimeImmutable $observed, ?\DateTimeImmutable $stored): ?\DateTimeImmutable
-    {
-        if ($observed === null || $stored === null) {
-            return $observed ?? $stored;
-        }
-
-        return $observed > $stored ? $observed : $stored;
     }
 
     /**
@@ -651,61 +528,23 @@ class ReportingService
         array $watchedEventLabels,
         \DateTimeImmutable $now
     ): ?MetricReport {
-        // The watched set is the current model and takes precedence. The
-        // per-source path below stays only for an install whose rows have not
-        // been migrated yet; once the set is populated it is never consulted.
-        if ($watchedJobCodes !== [] || $watchedEventLabels !== []) {
-            return $this->watchedSetEvaluator->evaluate(
-                $storeViewId,
-                $storeViewCode,
-                $watchedJobCodes,
-                $watchedEventLabels,
-                $now
-            );
-        }
-
-        $config = $this->integrationHealthConfigRepository->get($storeViewId);
-        // An unreadable source means "we can't tell right now", so it falls back to
-        // the retirement heartbeat rather than a fabricated DOWN observation.
-        $observation = $config !== null ? $this->observeConfiguredSource($config, $now) : null;
-
-        if ($config === null || $observation === null) {
-            return $this->integrationHealthEvaluator->heartbeatRetiredIfPreviouslyReported(
+        // Nothing watched: keep a previously-reported store view heartbeating
+        // rather than going silent, or the platform's staleness sweep alerts
+        // on a signal the merchant deliberately switched off.
+        if ($watchedJobCodes === [] && $watchedEventLabels === []) {
+            return $this->watchedSetEvaluator->heartbeatRetiredIfPreviouslyReported(
                 $storeViewId,
                 $storeViewCode,
                 $now
             );
         }
 
-        return $this->integrationHealthEvaluator->evaluate(
+        return $this->watchedSetEvaluator->evaluate(
             $storeViewId,
             $storeViewCode,
-            $config->sourceType,
-            $config->sourceIdentifier,
-            $observation->latestSuccessAt,
-            $observation->latestFailureAt,
-            $this->thresholdSecondsFor($config),
+            $watchedJobCodes,
+            $watchedEventLabels,
             $now
         );
-    }
-
-    /**
-     * Dispatches to whichever configured state-poll source this store view has, or null if unrecognized.
-     *
-     * @param IntegrationHealthConfig $config
-     * @param \DateTimeImmutable $now
-     * @return Observation|null
-     */
-    private function observeConfiguredSource(IntegrationHealthConfig $config, \DateTimeImmutable $now): ?Observation
-    {
-        return match ($config->sourceType) {
-            IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB
-                => $this->cronJobObserver->observe($config->sourceIdentifier, $now),
-            IntegrationHealthConfig::SOURCE_TYPE_QUEUE_CONSUMER
-                => $this->queueConsumerObserver->observe($config->sourceIdentifier, $now),
-            IntegrationHealthConfig::SOURCE_TYPE_CONVENTION_EVENT
-                => $this->conventionEventReader->observe($config->storeViewId, $config->sourceIdentifier, $now),
-            default => null,
-        };
     }
 }

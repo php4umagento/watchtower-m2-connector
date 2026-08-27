@@ -27,18 +27,10 @@ use Watchtower\Connector\Model\CronHealth\Evaluator;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
 use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
-use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
-use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
-use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
-use Watchtower\Connector\Model\CronJobObservation\JobRunObservationRepository;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedSetEvaluator;
 use Watchtower\Connector\Model\IndexerHealth\Evaluator as IndexerHealthEvaluator;
 use Watchtower\Connector\Model\QueueHealth\Evaluator as QueueHealthEvaluator;
-use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
-use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
 use Watchtower\Connector\Model\AdminAuthFailure\Evaluator as AdminAuthFailureEvaluator;
 use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
@@ -130,25 +122,6 @@ class ReportingCyclePerfTest extends TestCase
     }
 
     /**
-     * IntegrationHealthConfigRepository::get() (the per-store-view gate
-     * deciding whether a 4th, integration_health report is produced) must
-     * be called exactly once per store view -- not skipped, and not
-     * called redundantly within the same store view's own iteration.
-     */
-    public function testIntegrationHealthConfigIsCheckedExactlyOncePerStoreView(): void
-    {
-        $integrationHealthConfigRepository = $this->createMock(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->expects(self::exactly(self::STORE_VIEW_COUNT))
-            ->method('get')
-            ->willReturn(null);
-
-        $this->service(
-            storeManager: $this->storeManagerWith(self::STORE_VIEW_COUNT),
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
-        )->run();
-    }
-
-    /**
      * A generous wall-clock ceiling for a fully-mocked (no real I/O)
      * multi-store-view cycle -- not a throughput claim, just a smoke test
      * against a pathological O(n^2)/accidental-sleep regression. Every
@@ -229,7 +202,6 @@ class ReportingCyclePerfTest extends TestCase
         ?CustomerAccountReader $customerAccountReader = null,
         ?RollupRepository $rollupRepository = null,
         ?DispersionEvaluator $dispersionEvaluator = null,
-        ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
         ?HistorySeeder $historySeeder = null,
     ): ReportingService {
         $config = $this->createStub(Config::class);
@@ -259,9 +231,6 @@ class ReportingCyclePerfTest extends TestCase
         $bufferRepository->method('isDue')->willReturn(false);
         $bufferRepository->method('bufferReport')->willReturn(0);
 
-        $integrationHealthEvaluator = $this->createStub(IntegrationHealthEvaluator::class);
-        $integrationHealthEvaluator->method('heartbeatRetiredIfPreviouslyReported')->willReturn(null);
-
         if ($rollupRepository === null) {
             $rollupRepository = $this->createStub(RollupRepository::class);
             // Already-seeded by default, so seedIfNeverSeeded() is a no-op --
@@ -285,12 +254,6 @@ class ReportingCyclePerfTest extends TestCase
             $this->createStub(CheckoutFailureEvaluator::class),
             $historySeeder ?? $this->createStub(HistorySeeder::class),
             $this->createStub(SeedCoverageRepository::class),
-            $integrationHealthConfigRepository ?? $this->stubIntegrationHealthConfigRepository(),
-            $integrationHealthEvaluator,
-            $this->createStub(IntegrationHealthStateRepository::class),
-            $this->createStub(CronJobObserver::class),
-            $this->createStub(QueueConsumerObserver::class),
-            $this->createStub(ConventionEventReader::class),
             $this->stubOrganizationStateRepository(),
             $this->createStub(LoggerInterface::class),
             $this->createStub(SubmissionOutcomeRepository::class),
@@ -298,8 +261,6 @@ class ReportingCyclePerfTest extends TestCase
             $this->stubConnectorVersionStateRepository(),
             $this->createStub(IndexerHealthEvaluator::class),
             $this->createStub(QueueHealthEvaluator::class),
-            $this->createStub(JobRunObservationRepository::class),
-            new CadenceEstimator(),
             $this->createStub(WatchedJobResolver::class),
             $this->createStub(WatchedSetEvaluator::class),
         );
@@ -335,14 +296,6 @@ class ReportingCyclePerfTest extends TestCase
         $evaluator->method('evaluate')->willReturn($this->storeViewReport());
 
         return $evaluator;
-    }
-
-    private function stubIntegrationHealthConfigRepository(): IntegrationHealthConfigRepository
-    {
-        $repository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $repository->method('get')->willReturn(null);
-
-        return $repository;
     }
 
     private function stubOrganizationStateRepository(): OrganizationStateRepository

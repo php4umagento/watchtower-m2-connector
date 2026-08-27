@@ -27,8 +27,7 @@ use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
 use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
 use Watchtower\Connector\Model\HealthState\HealthState;
 use Watchtower\Connector\Model\HealthState\HealthStateRepository;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfig;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthState;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
@@ -152,13 +151,13 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             )
         );
 
-        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->method('get')->willReturn(null);
+        $watchedIntegrationRepository = $this->createStub(WatchedIntegrationRepository::class);
+        $watchedIntegrationRepository->method('hasAnyWatched')->willReturn(false);
 
         $snapshot = $this->provider(
             storeManager: $storeManager,
             dispersionStateRepository: $dispersionStateRepository,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+            watchedIntegrationRepository: $watchedIntegrationRepository,
         )->snapshot($this->now());
 
         self::assertCount(1, $snapshot->storeViews);
@@ -208,14 +207,14 @@ class DiagnosticsSnapshotProviderTest extends TestCase
                 : null
         );
 
-        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->method('get')->willReturn(null);
+        $watchedIntegrationRepository = $this->createStub(WatchedIntegrationRepository::class);
+        $watchedIntegrationRepository->method('hasAnyWatched')->willReturn(false);
 
         $snapshot = $this->provider(
             storeManager: $storeManager,
             dispersionStateRepository: $dispersionStateRepository,
             dispersionEvaluator: $dispersionEvaluator,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+            watchedIntegrationRepository: $watchedIntegrationRepository,
         )->snapshot($this->now());
 
         $signals = $snapshot->storeViews[0]->signals;
@@ -253,13 +252,13 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             )
         );
 
-        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->method('get')->willReturn(null);
+        $watchedIntegrationRepository = $this->createStub(WatchedIntegrationRepository::class);
+        $watchedIntegrationRepository->method('hasAnyWatched')->willReturn(false);
 
         $snapshot = $this->provider(
             storeManager: $storeManager,
             dispersionStateRepository: $dispersionStateRepository,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+            watchedIntegrationRepository: $watchedIntegrationRepository,
         )->snapshot($this->now());
 
         $byCategory = [];
@@ -307,14 +306,14 @@ class DiagnosticsSnapshotProviderTest extends TestCase
                 : null
         );
 
-        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->method('get')->willReturn(null);
+        $watchedIntegrationRepository = $this->createStub(WatchedIntegrationRepository::class);
+        $watchedIntegrationRepository->method('hasAnyWatched')->willReturn(false);
 
         $snapshot = $this->provider(
             storeManager: $storeManager,
             dispersionStateRepository: $dispersionStateRepository,
             seedCoverageRepository: $seedCoverageRepository,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+            watchedIntegrationRepository: $watchedIntegrationRepository,
         )->snapshot($this->now());
 
         $byCategory = [];
@@ -334,7 +333,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
      * uses to decide whether to query IntegrationHealthStateRepository at
      * all for that store view.
      */
-    public function testIntegrationHealthSignalOnlyAppearsWhenAConfigExists(): void
+    public function testIntegrationHealthSignalOnlyAppearsWhenSomethingIsWatched(): void
     {
         $storeManager = $this->createStub(StoreManagerInterface::class);
         $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
@@ -350,10 +349,8 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             )
         );
 
-        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->method('get')->willReturn(
-            $this->createStub(IntegrationHealthConfig::class)
-        );
+        $watchedIntegrationRepository = $this->createStub(WatchedIntegrationRepository::class);
+        $watchedIntegrationRepository->method('hasAnyWatched')->willReturn(true);
 
         $integrationHealthStateRepository = $this->createStub(IntegrationHealthStateRepository::class);
         $integrationHealthStateRepository->method('get')->willReturn(new IntegrationHealthState(
@@ -369,7 +366,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         $snapshot = $this->provider(
             storeManager: $storeManager,
             dispersionStateRepository: $dispersionStateRepository,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
+            watchedIntegrationRepository: $watchedIntegrationRepository,
             integrationHealthStateRepository: $integrationHealthStateRepository,
         )->snapshot($this->now());
 
@@ -477,7 +474,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         ?DispersionEvaluator $dispersionEvaluator = null,
         ?SeedCoverageRepository $seedCoverageRepository = null,
         ?IntegrationHealthStateRepository $integrationHealthStateRepository = null,
-        ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
+        ?WatchedIntegrationRepository $watchedIntegrationRepository = null,
         ?StoreManagerInterface $storeManager = null,
         ?SubmissionOutcomeRepository $submissionOutcomeRepository = null,
         ?EnvironmentStateRepository $environmentStateRepository = null,
@@ -534,9 +531,9 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             $integrationHealthStateRepository = $this->createStub(IntegrationHealthStateRepository::class);
         }
 
-        if ($integrationHealthConfigRepository === null) {
-            $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-            $integrationHealthConfigRepository->method('get')->willReturn(null);
+        if ($watchedIntegrationRepository === null) {
+            $watchedIntegrationRepository = $this->createStub(WatchedIntegrationRepository::class);
+            $watchedIntegrationRepository->method('hasAnyWatched')->willReturn(false);
         }
 
         if ($storeManager === null) {
@@ -582,7 +579,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             $dispersionEvaluator,
             $seedCoverageRepository,
             $integrationHealthStateRepository,
-            $integrationHealthConfigRepository,
+            $watchedIntegrationRepository,
             new LiveStoreViewResolver($storeManager),
             $submissionOutcomeRepository,
             $environmentStateRepository,

@@ -23,7 +23,6 @@ use Watchtower\Connector\Model\Buffer\BufferedReport;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
-use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
 use Watchtower\Connector\Model\CronJobObservation\JobRunObservation;
 use Watchtower\Connector\Model\CronJobObservation\JobRunObservationRepository;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
@@ -31,15 +30,8 @@ use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\IndexerHealth\Evaluator as IndexerHealthEvaluator;
 use Watchtower\Connector\Model\QueueHealth\Evaluator as QueueHealthEvaluator;
-use Watchtower\Connector\Model\IntegrationHealth\ConventionEventReader;
-use Watchtower\Connector\Model\IntegrationHealth\CronJobObserver;
-use Watchtower\Connector\Model\IntegrationHealth\Evaluator as IntegrationHealthEvaluator;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfig;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthState;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\IntegrationHealth\Observation;
-use Watchtower\Connector\Model\IntegrationHealth\QueueConsumerObserver;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedSetEvaluator;
 use Watchtower\Connector\Model\Organization\OrganizationStateRepository;
@@ -1284,448 +1276,6 @@ class ReportingServiceTest extends TestCase
     }
 
     /**
-     * A store view with a configured cron_job source gets its
-     * source observed via CronJobObserver (never the other two observers),
-     * and the resulting report is evaluated and included in the submitted
-     * batch alongside the three rate-based category reports.
-     */
-    public function testAStoreViewWithAConfiguredCronJobSourceIsEvaluatedViaCronJobObserver(): void
-    {
-        $config = $this->configuredAndEnabled();
-        $cronHealthReport = $this->report(sequenceNumber: 1);
-
-        $evaluator = $this->createStub(Evaluator::class);
-        $evaluator->method('evaluate')->willReturn($cronHealthReport);
-
-        $storeManager = $this->createStub(StoreManagerInterface::class);
-        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
-
-        $basketQuoteReader = $this->createStub(BasketQuoteReader::class);
-        $basketQuoteReader->method('countForWindow')->willReturn(0);
-        $checkoutReader = $this->createStub(CheckoutReader::class);
-        $checkoutReader->method('countForWindow')->willReturn(0);
-        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
-        $customerAccountReader->method('countForWindow')->willReturn(0);
-
-        $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
-        $dispersionEvaluator->method('evaluate')->willReturnCallback(
-            fn (int $storeViewId, string $storeViewCode, string $category): MetricReport
-                => $this->storeViewReport($category, $storeViewCode)
-        );
-
-        $integrationHealthConfig = new IntegrationHealthConfig(
-            storeViewId: 1,
-            sourceType: IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB,
-            sourceIdentifier: 'watchtower_example_cron',
-            expectedMaxIntervalMinutes: 60,
-        );
-        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->method('get')->willReturn($integrationHealthConfig);
-
-        $observation = new Observation(
-            latestSuccessAt: new \DateTimeImmutable('2026-08-13T14:30:00+00:00'),
-            latestFailureAt: null,
-        );
-        $cronJobObserver = $this->createMock(CronJobObserver::class);
-        $cronJobObserver->expects(self::once())->method('observe')
-            ->with('watchtower_example_cron', self::isInstanceOf(\DateTimeImmutable::class))
-            ->willReturn($observation);
-
-        $queueConsumerObserver = $this->createMock(QueueConsumerObserver::class);
-        $queueConsumerObserver->expects(self::never())->method('observe');
-
-        $conventionEventReader = $this->createMock(ConventionEventReader::class);
-        $conventionEventReader->expects(self::never())->method('observe');
-
-        $integrationHealthReport = $this->integrationHealthReport('default');
-        $integrationHealthEvaluator = $this->createMock(IntegrationHealthEvaluator::class);
-        $integrationHealthEvaluator->expects(self::once())
-            ->method('evaluate')
-            ->with(
-                1,
-                'default',
-                IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB,
-                'watchtower_example_cron',
-                $observation->latestSuccessAt,
-                $observation->latestFailureAt,
-                // This test is about source dispatch. Where the threshold
-                // comes from is covered on its own, below.
-                self::anything(),
-                self::isInstanceOf(\DateTimeImmutable::class)
-            )
-            ->willReturn($integrationHealthReport);
-
-        $bufferRepository = $this->createStub(ReportBufferRepository::class);
-        $bufferRepository->method('discardExpired')->willReturn(0);
-        $bufferRepository->method('isDue')->willReturn(true);
-        $bufferRepository->method('allBuffered')->willReturn([]);
-
-        $result = new MetricsSubmissionResult(succeeded: true, accepted: 5, rejected: []);
-        $submissionService = $this->createMock(MetricsSubmissionService::class);
-        $submissionService->expects(self::once())
-            ->method('submit')
-            ->with(
-                'https://watchtower.test',
-                'secret-api-key-value',
-                self::callback(fn (array $reports) => in_array($integrationHealthReport, $reports, true))
-            )
-            ->willReturn($result);
-
-        $outcome = $this->service(
-            config: $config,
-            evaluator: $evaluator,
-            submissionService: $submissionService,
-            bufferRepository: $bufferRepository,
-            storeManager: $storeManager,
-            basketQuoteReader: $basketQuoteReader,
-            checkoutReader: $checkoutReader,
-            customerAccountReader: $customerAccountReader,
-            dispersionEvaluator: $dispersionEvaluator,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
-            integrationHealthEvaluator: $integrationHealthEvaluator,
-            cronJobObserver: $cronJobObserver,
-            queueConsumerObserver: $queueConsumerObserver,
-            conventionEventReader: $conventionEventReader,
-        )->run();
-
-        self::assertContains($integrationHealthReport, $outcome['storeViewReports']);
-    }
-
-    /**
-     * The defect this whole redesign exists for. A nightly ERP sync judged
-     * against the retired hand-typed 60-minute default sat in SEVERE_DROP for
-     * 23 hours out of every 24 while perfectly healthy, because a success at
-     * 02:00 is outside a one-hour window for the rest of the day. The window
-     * has to come from what the job was measured doing, not from a number the
-     * merchant was asked to guess.
-     */
-    public function testANightlyJobIsJudgedAgainstItsMeasuredCadenceNotTheConfiguredInterval(): void
-    {
-        $day = 86400;
-        $observationRepository = $this->createStub(JobRunObservationRepository::class);
-        $observationRepository->method('get')->willReturn(new JobRunObservation(
-            jobCode: 'nightly_erp_sync',
-            firstObservedAt: new \DateTimeImmutable('2026-08-01T02:00:00+00:00'),
-            lastSuccessAt: new \DateTimeImmutable('2026-08-13T02:00:00+00:00'),
-            observedRunCount: 9,
-            gapSamples: array_fill(0, 8, $day),
-        ));
-
-        $threshold = null;
-        $this->runWithIntegrationHealthSource(
-            IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB,
-            'nightly_erp_sync',
-            $observationRepository,
-            $threshold
-        );
-
-        self::assertNotNull($threshold, 'A job measured this often must yield a threshold, not the learning state.');
-        self::assertGreaterThan(
-            $day,
-            $threshold,
-            'A nightly job must be given a window beyond a day, never the 60 minutes its configuration still carries.'
-        );
-    }
-
-    /**
-     * Only cron jobs are measurable this way. A queue consumer's activity is
-     * read from magento_operation and a convention event's from the merchant's
-     * own dispatches, neither of which the run recorder watches, so both keep
-     * the interval their configuration already carries.
-     */
-    public function testANonCronSourceKeepsTheIntervalItsConfigurationCarries(): void
-    {
-        $threshold = null;
-        $this->runWithIntegrationHealthSource(
-            IntegrationHealthConfig::SOURCE_TYPE_QUEUE_CONSUMER,
-            'async.operations.all',
-            null,
-            $threshold
-        );
-
-        // The helper configures 60 minutes.
-        self::assertSame(3600, $threshold);
-    }
-
-    /**
-     * source_type dispatch for the other two source kinds --
-     * queue_consumer routes to QueueConsumerObserver and convention_event
-     * routes to ConventionEventReader, never CronJobObserver.
-     */
-    public function testAConfiguredQueueConsumerSourceIsEvaluatedViaQueueConsumerObserver(): void
-    {
-        $outcome = $this->runWithIntegrationHealthSource(
-            IntegrationHealthConfig::SOURCE_TYPE_QUEUE_CONSUMER,
-            'async.operations.all'
-        );
-
-        self::assertContains($outcome['report'], $outcome['storeViewReports']);
-    }
-
-    public function testAConfiguredConventionEventSourceIsEvaluatedViaConventionEventReader(): void
-    {
-        $outcome = $this->runWithIntegrationHealthSource(
-            IntegrationHealthConfig::SOURCE_TYPE_CONVENTION_EVENT,
-            'erp_sync'
-        );
-
-        self::assertContains($outcome['report'], $outcome['storeViewReports']);
-    }
-
-    /**
-     * A store view with no configured integration_health source
-     * (the default in every other test's no-op wiring) produces exactly the
-     * three rate-based category reports and nothing else -- the evaluator
-     * and all three observers/readers are never touched.
-     */
-    public function testAStoreViewWithNoConfiguredIntegrationHealthSourceProducesNoIntegrationHealthReport(): void
-    {
-        $config = $this->configuredAndEnabled();
-        $cronHealthReport = $this->report(sequenceNumber: 1);
-
-        $evaluator = $this->createStub(Evaluator::class);
-        $evaluator->method('evaluate')->willReturn($cronHealthReport);
-
-        $storeManager = $this->createStub(StoreManagerInterface::class);
-        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
-
-        $basketQuoteReader = $this->createStub(BasketQuoteReader::class);
-        $basketQuoteReader->method('countForWindow')->willReturn(0);
-        $checkoutReader = $this->createStub(CheckoutReader::class);
-        $checkoutReader->method('countForWindow')->willReturn(0);
-        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
-        $customerAccountReader->method('countForWindow')->willReturn(0);
-
-        $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
-        $dispersionEvaluator->method('evaluate')->willReturnCallback(
-            fn (int $storeViewId, string $storeViewCode, string $category): MetricReport
-                => $this->storeViewReport($category, $storeViewCode)
-        );
-
-        $integrationHealthConfigRepository = $this->createMock(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->expects(self::once())->method('get')->with(1)->willReturn(null);
-
-        $integrationHealthEvaluator = $this->createMock(IntegrationHealthEvaluator::class);
-        $integrationHealthEvaluator->expects(self::never())->method('evaluate');
-        // Never-configured (returns null, no prior state to keep alive) --
-        // still called, just returns nothing, so the batch stays at 3.
-        $integrationHealthEvaluator->expects(self::once())
-            ->method('heartbeatRetiredIfPreviouslyReported')
-            ->with(1, 'default')
-            ->willReturn(null);
-
-        $bufferRepository = $this->createStub(ReportBufferRepository::class);
-        $bufferRepository->method('discardExpired')->willReturn(0);
-        $bufferRepository->method('isDue')->willReturn(true);
-        $bufferRepository->method('allBuffered')->willReturn([]);
-
-        $submissionService = $this->createStub(MetricsSubmissionService::class);
-        $submissionService->method('submit')
-            ->willReturn(new MetricsSubmissionResult(succeeded: true, accepted: 4, rejected: []));
-
-        $outcome = $this->service(
-            config: $config,
-            evaluator: $evaluator,
-            submissionService: $submissionService,
-            bufferRepository: $bufferRepository,
-            storeManager: $storeManager,
-            basketQuoteReader: $basketQuoteReader,
-            checkoutReader: $checkoutReader,
-            customerAccountReader: $customerAccountReader,
-            dispersionEvaluator: $dispersionEvaluator,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
-            integrationHealthEvaluator: $integrationHealthEvaluator,
-        )->run();
-
-        // Three rate categories plus checkout_failure; integration_health absent.
-        self::assertCount(4, $outcome['storeViewReports']);
-    }
-
-    /**
-     * A store view that WAS configured and had its source cleared (or
-     * whose source_type no longer resolves) must keep heartbeating its
-     * last confirmed integration_health status, never go fully silent --
-     * see Evaluator::heartbeatRetiredIfPreviouslyReported()'s own docblock
-     * for why (the platform's staleness sweep has no concept of a
-     * deliberately-retired signal). Distinguishing this from "never
-     * configured" is the whole point of this test: both produce
-     * config === null, but only one has a report to keep alive.
-     */
-    public function testAClearedIntegrationHealthSourceKeepsHeartbeatingRatherThanGoingSilent(): void
-    {
-        $config = $this->configuredAndEnabled();
-        $cronHealthReport = $this->report(sequenceNumber: 1);
-
-        $evaluator = $this->createStub(Evaluator::class);
-        $evaluator->method('evaluate')->willReturn($cronHealthReport);
-
-        $storeManager = $this->createStub(StoreManagerInterface::class);
-        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
-
-        $basketQuoteReader = $this->createStub(BasketQuoteReader::class);
-        $basketQuoteReader->method('countForWindow')->willReturn(0);
-        $checkoutReader = $this->createStub(CheckoutReader::class);
-        $checkoutReader->method('countForWindow')->willReturn(0);
-        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
-        $customerAccountReader->method('countForWindow')->willReturn(0);
-
-        $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
-        $dispersionEvaluator->method('evaluate')->willReturnCallback(
-            fn (int $storeViewId, string $storeViewCode, string $category): MetricReport
-                => $this->storeViewReport($category, $storeViewCode)
-        );
-
-        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->method('get')->willReturn(null);
-
-        $retirementHeartbeat = $this->integrationHealthReport('default');
-        $integrationHealthEvaluator = $this->createMock(IntegrationHealthEvaluator::class);
-        $integrationHealthEvaluator->expects(self::never())->method('evaluate');
-        $integrationHealthEvaluator->expects(self::once())
-            ->method('heartbeatRetiredIfPreviouslyReported')
-            ->with(1, 'default')
-            ->willReturn($retirementHeartbeat);
-
-        $bufferRepository = $this->createStub(ReportBufferRepository::class);
-        $bufferRepository->method('discardExpired')->willReturn(0);
-        $bufferRepository->method('isDue')->willReturn(true);
-        $bufferRepository->method('allBuffered')->willReturn([]);
-
-        $result = new MetricsSubmissionResult(succeeded: true, accepted: 4, rejected: []);
-        $submissionService = $this->createMock(MetricsSubmissionService::class);
-        $submissionService->expects(self::once())
-            ->method('submit')
-            ->with(
-                'https://watchtower.test',
-                'secret-api-key-value',
-                self::callback(fn (array $reports) => in_array($retirementHeartbeat, $reports, true))
-            )
-            ->willReturn($result);
-
-        $outcome = $this->service(
-            config: $config,
-            evaluator: $evaluator,
-            submissionService: $submissionService,
-            bufferRepository: $bufferRepository,
-            storeManager: $storeManager,
-            basketQuoteReader: $basketQuoteReader,
-            checkoutReader: $checkoutReader,
-            customerAccountReader: $customerAccountReader,
-            dispersionEvaluator: $dispersionEvaluator,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
-            integrationHealthEvaluator: $integrationHealthEvaluator,
-        )->run();
-
-        self::assertContains($retirementHeartbeat, $outcome['storeViewReports']);
-    }
-
-    /**
-     * The reason the snapshot exists at all: Magento drops a succeeded
-     * cron_schedule row roughly an hour after it finishes, so a success seen
-     * on a 5-minute tick has to be persisted then, not an hour later when the
-     * evaluation cycle next runs and the row is already gone.
-     */
-    public function testTheEvidenceSnapshotPersistsANewlyObservedSuccess(): void
-    {
-        $observedSuccessAt = new \DateTimeImmutable('2026-08-13T14:30:00+00:00');
-
-        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
-        $stateRepository->method('get')->willReturn($this->integrationHealthState(
-            lastSuccessAt: new \DateTimeImmutable('2026-08-12T14:30:00+00:00'),
-            lastFailureAt: null,
-        ));
-        $stateRepository->expects(self::once())
-            ->method('saveObservedEvidence')
-            ->with(1, $observedSuccessAt, null);
-
-        $this->snapshotService(
-            $stateRepository,
-            $this->cronJobObserverReturning($observedSuccessAt, null)
-        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
-    }
-
-    /**
-     * Evidence is a high-water mark, not a snapshot of the lookback window:
-     * an observation that is older than what is already stored (or missing
-     * entirely, once the source table has been pruned) must leave the stored
-     * value alone rather than ageing it back into a false DOWN.
-     */
-    public function testTheEvidenceSnapshotNeverMovesStoredEvidenceBackwards(): void
-    {
-        $storedSuccessAt = new \DateTimeImmutable('2026-08-13T14:30:00+00:00');
-        $storedFailureAt = new \DateTimeImmutable('2026-08-13T12:00:00+00:00');
-
-        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
-        $stateRepository->method('get')->willReturn($this->integrationHealthState(
-            lastSuccessAt: $storedSuccessAt,
-            lastFailureAt: $storedFailureAt,
-        ));
-        $stateRepository->expects(self::once())
-            ->method('saveObservedEvidence')
-            ->with(1, $storedSuccessAt, $storedFailureAt);
-
-        $this->snapshotService(
-            $stateRepository,
-            // Older success, and no failure at all this tick.
-            $this->cronJobObserverReturning(new \DateTimeImmutable('2026-08-13T09:00:00+00:00'), null)
-        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
-    }
-
-    /**
-     * A merchant who repointed the store view at a different source has state
-     * describing the old one. Re-seeding that is the evaluator's job, so the
-     * snapshot skips the store view rather than writing fresh evidence under
-     * a stale fingerprint.
-     */
-    public function testTheEvidenceSnapshotIsSkippedWhenTheStateDescribesADifferentSource(): void
-    {
-        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
-        $stateRepository->method('get')->willReturn($this->integrationHealthState(
-            lastSuccessAt: new \DateTimeImmutable('2026-08-13T14:30:00+00:00'),
-            lastFailureAt: null,
-            sourceIdentifier: 'a_job_the_merchant_has_since_replaced',
-        ));
-        $stateRepository->expects(self::never())->method('saveObservedEvidence');
-
-        $cronJobObserver = $this->createMock(CronJobObserver::class);
-        $cronJobObserver->expects(self::never())->method('observe');
-
-        $this->snapshotService($stateRepository, $cronJobObserver)
-            ->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
-    }
-
-    /**
-     * The snapshot is evidence capture only. Anything that would advance the
-     * debounce state machine (a full save(), an evaluation, a submission) runs
-     * 12x too often here and would both spam sequence numbers and confirm
-     * status changes on a cadence the ruleset was never designed around.
-     */
-    public function testTheEvidenceSnapshotWritesNoStatusOrSequenceNumberAndSubmitsNothing(): void
-    {
-        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
-        $stateRepository->method('get')->willReturn($this->integrationHealthState(
-            lastSuccessAt: null,
-            lastFailureAt: null,
-        ));
-        $stateRepository->expects(self::once())->method('saveObservedEvidence');
-        $stateRepository->expects(self::never())->method('save');
-
-        $integrationHealthEvaluator = $this->createMock(IntegrationHealthEvaluator::class);
-        $integrationHealthEvaluator->expects(self::never())->method('evaluate');
-        $integrationHealthEvaluator->expects(self::never())->method('heartbeatRetiredIfPreviouslyReported');
-
-        $submissionService = $this->createMock(MetricsSubmissionService::class);
-        $submissionService->expects(self::never())->method('submit');
-
-        $this->snapshotService(
-            $stateRepository,
-            $this->cronJobObserverReturning(new \DateTimeImmutable('2026-08-13T14:30:00+00:00'), null),
-            $integrationHealthEvaluator,
-            $submissionService
-        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
-    }
-
-    /**
      * Same gate run() uses: an install that never set this up, or deliberately
      * switched it off, must not have its tables read every 5 minutes.
      *
@@ -1735,228 +1285,6 @@ class ReportingServiceTest extends TestCase
      */
     #[TestWith([false, true])]
     #[TestWith([true, false])]
-    public function testTheEvidenceSnapshotDoesNothingWhenNotConfiguredOrDisabled(
-        bool $isConfigured,
-        bool $isEnabled
-    ): void {
-        $config = $this->createStub(Config::class);
-        $config->method('isConfigured')->willReturn($isConfigured);
-        $config->method('isEnabled')->willReturn($isEnabled);
-
-        $storeManager = $this->createMock(StoreManagerInterface::class);
-        $storeManager->expects(self::never())->method('getStores');
-
-        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
-        $stateRepository->expects(self::never())->method('get');
-        $stateRepository->expects(self::never())->method('saveObservedEvidence');
-
-        $this->service(
-            config: $config,
-            evaluator: $this->createStub(Evaluator::class),
-            storeManager: $storeManager,
-            integrationHealthStateRepository: $stateRepository,
-        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
-    }
-
-    /**
-     * A store view with no integration_health source configured must cost
-     * nothing beyond the config lookup itself, since this runs every tick.
-     */
-    public function testTheEvidenceSnapshotSkipsAStoreViewWithNoConfiguredSource(): void
-    {
-        $storeManager = $this->createStub(StoreManagerInterface::class);
-        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
-
-        $stateRepository = $this->createMock(IntegrationHealthStateRepository::class);
-        $stateRepository->expects(self::never())->method('get');
-        $stateRepository->expects(self::never())->method('saveObservedEvidence');
-
-        $cronJobObserver = $this->createMock(CronJobObserver::class);
-        $cronJobObserver->expects(self::never())->method('observe');
-
-        $this->service(
-            config: $this->configuredAndEnabled(),
-            evaluator: $this->createStub(Evaluator::class),
-            storeManager: $storeManager,
-            integrationHealthStateRepository: $stateRepository,
-            cronJobObserver: $cronJobObserver,
-        )->snapshotIntegrationHealthEvidence(new \DateTimeImmutable('2026-08-13T14:35:00+00:00'));
-    }
-
-    /**
-     * Builds a ReportingService with one live store view whose
-     * integration_health source is the cron job SNAPSHOT_JOB_CODE names.
-     *
-     * @param IntegrationHealthStateRepository $stateRepository
-     * @param CronJobObserver $cronJobObserver
-     * @param IntegrationHealthEvaluator|null $integrationHealthEvaluator
-     * @param MetricsSubmissionService|null $submissionService
-     * @return ReportingService
-     */
-    private function snapshotService(
-        IntegrationHealthStateRepository $stateRepository,
-        CronJobObserver $cronJobObserver,
-        ?IntegrationHealthEvaluator $integrationHealthEvaluator = null,
-        ?MetricsSubmissionService $submissionService = null
-    ): ReportingService {
-        $storeManager = $this->createStub(StoreManagerInterface::class);
-        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
-
-        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->method('get')->willReturn(new IntegrationHealthConfig(
-            storeViewId: 1,
-            sourceType: IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB,
-            sourceIdentifier: self::SNAPSHOT_JOB_CODE,
-            expectedMaxIntervalMinutes: 1440,
-        ));
-
-        return $this->service(
-            config: $this->configuredAndEnabled(),
-            evaluator: $this->createStub(Evaluator::class),
-            submissionService: $submissionService,
-            storeManager: $storeManager,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
-            integrationHealthEvaluator: $integrationHealthEvaluator,
-            integrationHealthStateRepository: $stateRepository,
-            cronJobObserver: $cronJobObserver,
-        );
-    }
-
-    private function cronJobObserverReturning(
-        ?\DateTimeImmutable $latestSuccessAt,
-        ?\DateTimeImmutable $latestFailureAt
-    ): CronJobObserver {
-        $observer = $this->createStub(CronJobObserver::class);
-        $observer->method('observe')->willReturn(
-            new Observation(latestSuccessAt: $latestSuccessAt, latestFailureAt: $latestFailureAt)
-        );
-
-        return $observer;
-    }
-
-    private function integrationHealthState(
-        ?\DateTimeImmutable $lastSuccessAt,
-        ?\DateTimeImmutable $lastFailureAt,
-        string $sourceIdentifier = self::SNAPSHOT_JOB_CODE
-    ): IntegrationHealthState {
-        return new IntegrationHealthState(
-            storeViewId: 1,
-            lastSuccessAt: $lastSuccessAt,
-            lastFailureAt: $lastFailureAt,
-            pendingStatus: null,
-            confirmedStatus: SignalStatus::Normal,
-            sequenceNumber: 7,
-            lastReportedReason: ReportReason::Heartbeat,
-            sourceType: IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB,
-            sourceIdentifier: $sourceIdentifier,
-            observingSince: new \DateTimeImmutable('2026-08-01T00:00:00+00:00'),
-        );
-    }
-
-    /**
-     * Shared body for the queue_consumer/convention_event dispatch tests
-     * above: wires a single live store view with the given source_type/
-     * identifier configured, asserts only the matching observer/reader is
-     * called (the other two are asserted never-called), and returns the
-     * run() outcome plus the produced integration_health report.
-     *
-     * @param string $sourceType
-     * @param string $sourceIdentifier
-     * @return array{report: MetricReport, storeViewReports: MetricReport[]}
-     */
-    private function runWithIntegrationHealthSource(
-        string $sourceType,
-        string $sourceIdentifier,
-        ?JobRunObservationRepository $jobRunObservationRepository = null,
-        ?int &$capturedThreshold = null
-    ): array {
-        $config = $this->configuredAndEnabled();
-        $cronHealthReport = $this->report(sequenceNumber: 1);
-
-        $evaluator = $this->createStub(Evaluator::class);
-        $evaluator->method('evaluate')->willReturn($cronHealthReport);
-
-        $storeManager = $this->createStub(StoreManagerInterface::class);
-        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
-
-        $basketQuoteReader = $this->createStub(BasketQuoteReader::class);
-        $basketQuoteReader->method('countForWindow')->willReturn(0);
-        $checkoutReader = $this->createStub(CheckoutReader::class);
-        $checkoutReader->method('countForWindow')->willReturn(0);
-        $customerAccountReader = $this->createStub(CustomerAccountReader::class);
-        $customerAccountReader->method('countForWindow')->willReturn(0);
-
-        $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
-        $dispersionEvaluator->method('evaluate')->willReturnCallback(
-            fn (int $storeViewId, string $storeViewCode, string $category): MetricReport
-                => $this->storeViewReport($category, $storeViewCode)
-        );
-
-        $integrationHealthConfig = new IntegrationHealthConfig(
-            storeViewId: 1,
-            sourceType: $sourceType,
-            sourceIdentifier: $sourceIdentifier,
-            expectedMaxIntervalMinutes: 60,
-        );
-        $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-        $integrationHealthConfigRepository->method('get')->willReturn($integrationHealthConfig);
-
-        $observation = new Observation(
-            latestSuccessAt: new \DateTimeImmutable('2026-08-13T14:30:00+00:00'),
-            latestFailureAt: null,
-        );
-
-        $cronJobObserver = $this->createMock(CronJobObserver::class);
-        $queueConsumerObserver = $this->createMock(QueueConsumerObserver::class);
-        $conventionEventReader = $this->createMock(ConventionEventReader::class);
-
-        $cronJobObserver->expects($sourceType === IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB
-            ? self::once() : self::never())->method('observe')->willReturn($observation);
-        $queueConsumerObserver->expects($sourceType === IntegrationHealthConfig::SOURCE_TYPE_QUEUE_CONSUMER
-            ? self::once() : self::never())->method('observe')->willReturn($observation);
-        $conventionEventReader->expects($sourceType === IntegrationHealthConfig::SOURCE_TYPE_CONVENTION_EVENT
-            ? self::once() : self::never())->method('observe')->willReturn($observation);
-
-        $integrationHealthReport = $this->integrationHealthReport('default');
-        $integrationHealthEvaluator = $this->createStub(IntegrationHealthEvaluator::class);
-        $integrationHealthEvaluator->method('evaluate')->willReturnCallback(
-            function (...$arguments) use ($integrationHealthReport, &$capturedThreshold): MetricReport {
-                // Positional: the threshold is evaluate()'s 7th parameter.
-                $capturedThreshold = $arguments[6];
-
-                return $integrationHealthReport;
-            }
-        );
-
-        $bufferRepository = $this->createStub(ReportBufferRepository::class);
-        $bufferRepository->method('discardExpired')->willReturn(0);
-        $bufferRepository->method('isDue')->willReturn(true);
-        $bufferRepository->method('allBuffered')->willReturn([]);
-
-        $submissionService = $this->createStub(MetricsSubmissionService::class);
-        $submissionService->method('submit')
-            ->willReturn(new MetricsSubmissionResult(succeeded: true, accepted: 5, rejected: []));
-
-        $outcome = $this->service(
-            config: $config,
-            evaluator: $evaluator,
-            submissionService: $submissionService,
-            bufferRepository: $bufferRepository,
-            storeManager: $storeManager,
-            basketQuoteReader: $basketQuoteReader,
-            checkoutReader: $checkoutReader,
-            customerAccountReader: $customerAccountReader,
-            dispersionEvaluator: $dispersionEvaluator,
-            integrationHealthConfigRepository: $integrationHealthConfigRepository,
-            integrationHealthEvaluator: $integrationHealthEvaluator,
-            cronJobObserver: $cronJobObserver,
-            queueConsumerObserver: $queueConsumerObserver,
-            conventionEventReader: $conventionEventReader,
-            jobRunObservationRepository: $jobRunObservationRepository,
-        )->run();
-
-        return ['report' => $integrationHealthReport, 'storeViewReports' => $outcome['storeViewReports']];
-    }
 
     private function configuredAndEnabled(): Config
     {
@@ -2059,12 +1387,6 @@ class ReportingServiceTest extends TestCase
      * @param CheckoutFailureEvaluator|null $checkoutFailureEvaluator
      * @param HistorySeeder|null $historySeeder
      * @param SeedCoverageRepository|null $seedCoverageRepository
-     * @param IntegrationHealthConfigRepository|null $integrationHealthConfigRepository
-     * @param IntegrationHealthEvaluator|null $integrationHealthEvaluator
-     * @param IntegrationHealthStateRepository|null $integrationHealthStateRepository
-     * @param CronJobObserver|null $cronJobObserver
-     * @param QueueConsumerObserver|null $queueConsumerObserver
-     * @param ConventionEventReader|null $conventionEventReader
      * @param OrganizationStateRepository|null $organizationStateRepository
      * @param SubmissionOutcomeRepository|null $submissionOutcomeRepository
      * @param ConnectorVersionCheckService|null $connectorVersionCheckService
@@ -2086,18 +1408,11 @@ class ReportingServiceTest extends TestCase
         ?CheckoutFailureEvaluator $checkoutFailureEvaluator = null,
         ?HistorySeeder $historySeeder = null,
         ?SeedCoverageRepository $seedCoverageRepository = null,
-        ?IntegrationHealthConfigRepository $integrationHealthConfigRepository = null,
-        ?IntegrationHealthEvaluator $integrationHealthEvaluator = null,
-        ?IntegrationHealthStateRepository $integrationHealthStateRepository = null,
-        ?CronJobObserver $cronJobObserver = null,
-        ?QueueConsumerObserver $queueConsumerObserver = null,
-        ?ConventionEventReader $conventionEventReader = null,
         ?OrganizationStateRepository $organizationStateRepository = null,
         ?LoggerInterface $logger = null,
         ?SubmissionOutcomeRepository $submissionOutcomeRepository = null,
         ?ConnectorVersionCheckService $connectorVersionCheckService = null,
         ?ConnectorVersionStateRepository $connectorVersionStateRepository = null,
-        ?JobRunObservationRepository $jobRunObservationRepository = null,
         ?WatchedJobResolver $watchedJobResolver = null,
         ?WatchedSetEvaluator $watchedSetEvaluator = null,
     ): ReportingService {
@@ -2120,11 +1435,6 @@ class ReportingServiceTest extends TestCase
 
         if ($seedCoverageRepository === null) {
             $seedCoverageRepository = $this->createStub(SeedCoverageRepository::class);
-        }
-
-        if ($integrationHealthConfigRepository === null) {
-            $integrationHealthConfigRepository = $this->createStub(IntegrationHealthConfigRepository::class);
-            $integrationHealthConfigRepository->method('get')->willReturn(null);
         }
 
         if ($organizationStateRepository === null) {
@@ -2177,12 +1487,6 @@ class ReportingServiceTest extends TestCase
             $checkoutFailureEvaluator ?? $this->createStub(CheckoutFailureEvaluator::class),
             $historySeeder,
             $seedCoverageRepository,
-            $integrationHealthConfigRepository,
-            $integrationHealthEvaluator ?? $this->createStub(IntegrationHealthEvaluator::class),
-            $integrationHealthStateRepository ?? $this->createStub(IntegrationHealthStateRepository::class),
-            $cronJobObserver ?? $this->createStub(CronJobObserver::class),
-            $queueConsumerObserver ?? $this->createStub(QueueConsumerObserver::class),
-            $conventionEventReader ?? $this->createStub(ConventionEventReader::class),
             $organizationStateRepository,
             $logger ?? $this->createStub(LoggerInterface::class),
             $submissionOutcomeRepository ?? $this->createStub(SubmissionOutcomeRepository::class),
@@ -2190,8 +1494,6 @@ class ReportingServiceTest extends TestCase
             $connectorVersionStateRepository,
             $indexerHealthEvaluator,
             $queueHealthEvaluator,
-            $jobRunObservationRepository ?? $this->createStub(JobRunObservationRepository::class),
-            new CadenceEstimator(),
             // A default stub resolves to an empty watched set, so these tests
             // keep exercising the pre-migration per-source path unless one
             // explicitly opts in to the rollup.
@@ -2230,12 +1532,12 @@ class ReportingServiceTest extends TestCase
     {
         return new MetricReport(
             storeViewCode: $storeViewCode,
-            eventType: IntegrationHealthEvaluator::EVENT_TYPE,
+            eventType: WatchedSetEvaluator::EVENT_TYPE,
             status: SignalStatus::Normal,
             sequenceNumber: 1,
             evaluatedAt: new \DateTimeImmutable('2026-08-13T15:00:00+00:00'),
             reason: ReportReason::Transition,
-            rulesetVersion: IntegrationHealthEvaluator::RULESET_VERSION,
+            rulesetVersion: WatchedSetEvaluator::RULESET_VERSION,
         );
     }
 

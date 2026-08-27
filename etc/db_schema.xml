@@ -251,22 +251,6 @@
             <column name="hour_bucket"/>
         </constraint>
     </table>
-    <table name="watchtower_integration_health_config" resource="default" engine="innodb"
-           comment="Per-store-view configured integration_health source (admin source picker).">
-        <column xsi:type="int" name="store_view_id" unsigned="true" nullable="false"
-                comment="Magento store view id"/>
-        <column xsi:type="varchar" name="source_type" nullable="false" length="20"
-                comment="cron_job, queue_consumer, or convention_event"/>
-        <column xsi:type="varchar" name="source_identifier" nullable="false" length="255"
-                comment="A job_code, topic_name, or integration label, depending on source_type"/>
-        <column xsi:type="int" name="expected_max_interval_minutes" unsigned="true" nullable="false"
-                comment="How long a success may go unrenewed before this store view reports DOWN"/>
-        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
-                comment="Last saved"/>
-        <constraint xsi:type="primary" referenceId="PRIMARY">
-            <column name="store_view_id"/>
-        </constraint>
-    </table>
     <table name="watchtower_integration_health_event" resource="default" engine="innodb"
            comment="Local snapshot of watchtower_integration_health event dispatches (source #3).">
         <column xsi:type="int" name="id" unsigned="true" nullable="false" identity="true"

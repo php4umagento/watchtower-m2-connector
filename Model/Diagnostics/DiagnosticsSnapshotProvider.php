@@ -16,7 +16,7 @@ use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\Environment\EnvironmentStateRepository;
 use Watchtower\Connector\Model\EventCounter\EventCounterRepository;
 use Watchtower\Connector\Model\HealthState\HealthStateRepository;
-use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthConfigRepository;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
@@ -54,7 +54,7 @@ class DiagnosticsSnapshotProvider
      * @param SeedCoverageRepository $seedCoverageRepository read-only lookup of the last persisted
      *     seed outcome -- never invoke HistorySeeder::seed() from here, it writes rollup rows
      * @param IntegrationHealthStateRepository $integrationHealthStateRepository
-     * @param IntegrationHealthConfigRepository $integrationHealthConfigRepository
+     * @param WatchedIntegrationRepository $watchedIntegrationRepository
      * @param LiveStoreViewResolver $liveStoreViewResolver
      * @param SubmissionOutcomeRepository $submissionOutcomeRepository
      * @param EnvironmentStateRepository $environmentStateRepository
@@ -70,7 +70,7 @@ class DiagnosticsSnapshotProvider
         private readonly DispersionEvaluator $dispersionEvaluator,
         private readonly SeedCoverageRepository $seedCoverageRepository,
         private readonly IntegrationHealthStateRepository $integrationHealthStateRepository,
-        private readonly IntegrationHealthConfigRepository $integrationHealthConfigRepository,
+        private readonly WatchedIntegrationRepository $watchedIntegrationRepository,
         private readonly LiveStoreViewResolver $liveStoreViewResolver,
         private readonly SubmissionOutcomeRepository $submissionOutcomeRepository,
         private readonly EnvironmentStateRepository $environmentStateRepository,
@@ -179,7 +179,7 @@ class DiagnosticsSnapshotProvider
                 );
             }
 
-            if ($this->integrationHealthConfigRepository->get($storeViewId) !== null) {
+            if ($this->watchedIntegrationRepository->hasAnyWatched()) {
                 $state = $this->integrationHealthStateRepository->get($storeViewId);
                 $signals[] = new SignalSnapshot(
                     category: 'integration_health',

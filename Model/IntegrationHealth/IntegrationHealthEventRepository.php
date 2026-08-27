@@ -24,7 +24,7 @@ class IntegrationHealthEventRepository
 
     /**
      * How far back to look for evidence at all -- matches CronJobObserver/
-     * QueueConsumerObserver's lookback window. This bounds the query rather
+     * the same lookback the cron observers use. This bounds the query rather
      * than filtering meaningfully; Evaluator's expected-max-interval
      * comparison is what actually decides the status.
      */
