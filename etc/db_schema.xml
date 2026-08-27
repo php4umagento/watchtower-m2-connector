@@ -375,4 +375,24 @@
             <column name="id"/>
         </constraint>
     </table>
+    <table name="watchtower_cron_job_observation" resource="default" engine="innodb"
+           comment="Observed run cadence per cron job code; the basis for integration_health's derived threshold.">
+        <column xsi:type="varchar" name="job_code" nullable="false" length="255"
+                comment="Magento cron job code being observed"/>
+        <column xsi:type="datetime" name="first_observed_at" nullable="false"
+                comment="When this job code was first recorded; the learning-cadence grace runs from here"/>
+        <column xsi:type="datetime" name="last_success_at" nullable="true"
+                comment="Most recent success recorded; the cursor later runs are measured from"/>
+        <column xsi:type="int" name="observed_run_count" unsigned="true" nullable="false" default="0"
+                comment="Successes recorded since first_observed_at"/>
+        <column xsi:type="text" name="gap_samples" nullable="true"
+                comment="JSON array of the most recent inter-run gaps in seconds, oldest first"/>
+        <column xsi:type="int" name="median_gap_seconds" unsigned="true" nullable="true"
+                comment="Median of gap_samples, denormalized so the admin picker reads it without decoding JSON"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last recorded"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="job_code"/>
+        </constraint>
+    </table>
 </schema>

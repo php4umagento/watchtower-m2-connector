@@ -15,6 +15,7 @@ use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\CronJobObservation\CronJobRunRecorder;
 use Watchtower\Connector\Model\Reporting\ReportCycleState;
 use Watchtower\Connector\Model\Reporting\ReportCycleStateRepository;
 use Watchtower\Connector\Model\ReportingService;
@@ -38,7 +39,12 @@ class ReportJobTest extends TestCase
         $repository = $this->repositoryReturning(lastRunAt: null);
         $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $this->createStub(LoggerInterface::class)
+        ))->executeAt($now);
     }
 
     public function testDoesNotRunWhenLessThanAnHourHasPassedSinceTheLastRun(): void
@@ -49,7 +55,12 @@ class ReportJobTest extends TestCase
         $repository = $this->repositoryReturning(lastRunAt: new \DateTimeImmutable('2026-08-13 14:00:00'));
         $now = new \DateTimeImmutable('2026-08-13 14:59:59');
 
-        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $this->createStub(LoggerInterface::class)
+        ))->executeAt($now);
     }
 
     /**
@@ -73,7 +84,35 @@ class ReportJobTest extends TestCase
         ));
         $repository->expects(self::never())->method('save');
 
-        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $this->createStub(LoggerInterface::class)
+        ))->executeAt($now);
+    }
+
+    /**
+     * The cadence history has the same purge problem the evidence snapshot
+     * does, plus one of its own: a job running every minute produces several
+     * successes between two consecutive ticks, so a recorder that only ran on
+     * a due tick would measure that job's period as an hour rather than a
+     * minute.
+     */
+    public function testRecordsCronJobRunsEvenOnATickThatIsNotDue(): void
+    {
+        $now = new \DateTimeImmutable('2026-08-13 14:05:00');
+
+        $reportingService = $this->createMock(ReportingService::class);
+        $reportingService->expects(self::never())->method('run');
+
+        $recorder = $this->createMock(CronJobRunRecorder::class);
+        $recorder->expects(self::once())->method('record')->with($now);
+
+        $repository = $this->repositoryReturning(lastRunAt: new \DateTimeImmutable('2026-08-13 14:00:00'));
+
+        (new ReportJob($reportingService, $repository, $recorder, $this->createStub(LoggerInterface::class)))
+            ->executeAt($now);
     }
 
     public function testSnapshotsIntegrationHealthEvidenceOnADueTickToo(): void
@@ -86,7 +125,12 @@ class ReportJobTest extends TestCase
 
         $repository = $this->repositoryReturning(lastRunAt: new \DateTimeImmutable('2026-08-13 14:00:00'));
 
-        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $this->createStub(LoggerInterface::class)
+        ))->executeAt($now);
     }
 
     public function testRunsOnceExactlyAnHourHasPassedSinceTheLastRun(): void
@@ -97,7 +141,12 @@ class ReportJobTest extends TestCase
         $repository = $this->repositoryReturning(lastRunAt: new \DateTimeImmutable('2026-08-13 14:00:00'));
         $now = new \DateTimeImmutable('2026-08-13 15:00:00');
 
-        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $this->createStub(LoggerInterface::class)
+        ))->executeAt($now);
     }
 
     /**
@@ -115,7 +164,12 @@ class ReportJobTest extends TestCase
         $repository = $this->repositoryReturning(lastRunAt: new \DateTimeImmutable('2026-08-13 13:47:00'));
         $now = new \DateTimeImmutable('2026-08-13 14:52:00');
 
-        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $this->createStub(LoggerInterface::class)
+        ))->executeAt($now);
     }
 
     public function testDoesNotPersistARunWhenNotConfiguredOrDisabled(): void
@@ -129,7 +183,12 @@ class ReportJobTest extends TestCase
 
         $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $this->createStub(LoggerInterface::class)
+        ))->executeAt($now);
     }
 
     public function testPersistsTheRunWhenTheCycleActuallyRan(): void
@@ -151,7 +210,12 @@ class ReportJobTest extends TestCase
         $repository->method('get')->willReturn(new ReportCycleState(lastRunAt: null));
         $repository->expects(self::once())->method('save')->with($now);
 
-        (new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class)))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $this->createStub(LoggerInterface::class)
+        ))->executeAt($now);
     }
 
     public function testADueRunWithAFailedSubmissionIsStillLoggedAndBuffered(): void
@@ -176,7 +240,12 @@ class ReportJobTest extends TestCase
         $repository = $this->repositoryReturning(lastRunAt: null);
         $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $repository, $logger))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $logger
+        ))->executeAt($now);
     }
 
     /**
@@ -212,7 +281,12 @@ class ReportJobTest extends TestCase
         // trailing argument when invoked this way, same as a normal call --
         // the point is proving execute()'s own signature accepts it, not
         // exercising a different invocation mechanism.
-        $job = new ReportJob($reportingService, $repository, $this->createStub(LoggerInterface::class));
+        $job = new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $this->createStub(LoggerInterface::class)
+        );
         call_user_func_array([$job, 'execute'], [$scheduleStandIn]);
 
         // No assertion beyond "did not throw" -- that IS the regression this
@@ -267,7 +341,12 @@ class ReportJobTest extends TestCase
         $repository = $this->repositoryReturning(lastRunAt: null);
         $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $repository, $logger))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $logger
+        ))->executeAt($now);
     }
 
     /**
@@ -298,7 +377,12 @@ class ReportJobTest extends TestCase
         $repository = $this->repositoryReturning(lastRunAt: null);
         $now = new \DateTimeImmutable('2026-08-13 14:00:00');
 
-        (new ReportJob($reportingService, $repository, $logger))->executeAt($now);
+        (new ReportJob(
+            $reportingService,
+            $repository,
+            $this->createStub(CronJobRunRecorder::class),
+            $logger
+        ))->executeAt($now);
     }
 
     private function cronHealthReport(): MetricReport

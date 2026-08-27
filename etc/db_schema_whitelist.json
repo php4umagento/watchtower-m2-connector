@@ -243,5 +243,19 @@
         "constraint": {
             "PRIMARY": true
         }
+    },
+    "watchtower_cron_job_observation": {
+        "column": {
+            "job_code": true,
+            "first_observed_at": true,
+            "last_success_at": true,
+            "observed_run_count": true,
+            "gap_samples": true,
+            "median_gap_seconds": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
     }
 }

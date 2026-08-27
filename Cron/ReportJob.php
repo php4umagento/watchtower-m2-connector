@@ -10,6 +10,7 @@ namespace Watchtower\Connector\Cron;
 
 use Psr\Log\LoggerInterface;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
+use Watchtower\Connector\Model\CronJobObservation\CronJobRunRecorder;
 use Watchtower\Connector\Model\Reporting\ReportCycleStateRepository;
 use Watchtower\Connector\Model\ReportingService;
 
@@ -45,11 +46,13 @@ class ReportJob
     /**
      * @param ReportingService $reportingService
      * @param ReportCycleStateRepository $reportCycleStateRepository
+     * @param CronJobRunRecorder $cronJobRunRecorder
      * @param LoggerInterface $logger
      */
     public function __construct(
         private readonly ReportingService $reportingService,
         private readonly ReportCycleStateRepository $reportCycleStateRepository,
+        private readonly CronJobRunRecorder $cronJobRunRecorder,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -80,6 +83,12 @@ class ReportJob
         // rows about an hour after they finish, so evidence observed only once
         // per hourly cycle can be missed entirely. Capture-only, never a report.
         $this->reportingService->snapshotIntegrationHealthEvidence($now);
+
+        // Same purge, same every-tick answer, but a different question: this
+        // builds each job's run-cadence history, which is what the admin
+        // picker offers and what integration_health derives its threshold
+        // from instead of a hand-typed interval.
+        $this->cronJobRunRecorder->record($now);
 
         if (!$this->isDue($now)) {
             return;
