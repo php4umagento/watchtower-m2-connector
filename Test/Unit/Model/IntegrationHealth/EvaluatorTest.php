@@ -32,7 +32,7 @@ class EvaluatorTest extends TestCase
     private const NOW_STRING = '2026-08-13T15:00:00+00:00';
     private const STORE_VIEW_ID = 7;
     private const STORE_VIEW_CODE = 'default';
-    private const EXPECTED_MAX_INTERVAL_MINUTES = 30;
+    private const THRESHOLD_SECONDS = 1800;
     private const SOURCE_TYPE = IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB;
     private const SOURCE_IDENTIFIER = 'watchtower_example_cron';
 
@@ -55,7 +55,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -93,7 +93,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -127,7 +127,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -156,7 +156,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -199,7 +199,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -235,7 +235,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -258,7 +258,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             $this->now(),
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
         self::assertSame(SignalStatus::Normal, $tick1->status);
@@ -279,7 +279,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -320,7 +320,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -359,7 +359,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -388,7 +388,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -414,7 +414,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             $this->now(),
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -459,7 +459,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -469,19 +469,61 @@ class EvaluatorTest extends TestCase
     }
 
     /**
-     * The expected-max-interval is a per-store-view CONFIGURED value, not a
-     * hardcoded constant like CronHealth\Evaluator's own 30 minutes -- this
-     * proves a custom interval is genuinely respected, not silently ignored,
-     * by discriminating on the resulting pendingStatus (only observable via
-     * a real save) rather than the debounced report status alone, since a
+     * Until enough runs have been measured there is no honest window to judge
+     * a source against, so the verdict is withheld rather than guessed at.
+     * Reported as a Heartbeat, never a Transition: the platform alerts on any
+     * transition, INSUFFICIENT_DATA included, and "still measuring" is not
+     * something a merchant can act on.
+     */
+    public function testAnUnestablishedCadenceReportsInsufficientDataWithoutDebouncing(): void
+    {
+        $successLongAgo = $this->now()->modify('-3 days');
+
+        $savedState = null;
+        $repository = $this->createMock(IntegrationHealthStateRepository::class);
+        $repository->method('get')->willReturn(
+            $this->stateWith(confirmed: SignalStatus::Normal, pending: null, sequence: 4)
+        );
+        $repository->expects(self::once())->method('save')->with(self::captureInto($savedState));
+
+        $report = (new Evaluator($repository))->evaluate(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            self::SOURCE_TYPE,
+            self::SOURCE_IDENTIFIER,
+            $successLongAgo,
+            null,
+            null,
+            $this->now()
+        );
+
+        self::assertSame(SignalStatus::InsufficientData, $report->status);
+        self::assertSame(ReportReason::Heartbeat, $report->reason);
+        self::assertNull(
+            $savedState->pendingStatus,
+            'A source with no established cadence must not debounce towards an anomaly.'
+        );
+        self::assertEquals(
+            $successLongAgo,
+            $savedState->lastSuccessAt,
+            'Evidence must keep accumulating while the cadence is still being learned.'
+        );
+    }
+
+    /**
+     * The threshold is a per-source DERIVED value, not a hardcoded constant
+     * like CronHealth\Evaluator's own 30 minutes -- this proves the passed
+     * threshold is genuinely respected, not silently ignored, by
+     * discriminating on the resulting pendingStatus (only observable via a
+     * real save) rather than the debounced report status alone, since a
      * single tick's report never directly exposes the raw classification.
      */
-    public function testACustomExpectedMaxIntervalIsRespectedNotHardcoded(): void
+    public function testTheDerivedThresholdIsRespectedNotHardcoded(): void
     {
         $successFifteenMinutesAgo = $this->now()->modify('-15 minutes');
         $confirmedNormal = $this->stateWith(confirmed: SignalStatus::Normal, pending: null, sequence: 4);
 
-        // 15 minutes ago is STALE against a 10-minute expected interval ->
+        // 15 minutes ago is STALE against a 10-minute threshold ->
         // raw = SevereDrop, differs from confirmed Normal -> first
         // differing tick -> pendingStatus becomes SevereDrop.
         $savedTight = null;
@@ -496,14 +538,14 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             $successFifteenMinutesAgo,
             null,
-            10,
+            600,
             $this->now()
         );
 
         self::assertSame(SignalStatus::SevereDrop, $savedTight->pendingStatus);
 
-        // The SAME success timestamp is FRESH against a 60-minute expected
-        // interval -> raw = Normal, matches confirmed Normal -> no change
+        // The SAME success timestamp is FRESH against a 60-minute threshold
+        // -> raw = Normal, matches confirmed Normal -> no change
         // -> pendingStatus stays null.
         $savedWide = null;
         $repositoryWide = $this->createMock(IntegrationHealthStateRepository::class);
@@ -517,13 +559,13 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             $successFifteenMinutesAgo,
             null,
-            60,
+            3600,
             $this->now()
         );
 
         self::assertNull(
             $savedWide->pendingStatus,
-            'The same success timestamp must classify differently depending on the configured interval.'
+            'The same success timestamp must classify differently depending on the derived threshold.'
         );
     }
 
@@ -657,7 +699,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -714,7 +756,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -745,7 +787,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             $this->now(),
             null,
-            self::EXPECTED_MAX_INTERVAL_MINUTES,
+            self::THRESHOLD_SECONDS,
             $this->now()
         );
 
@@ -776,7 +818,7 @@ class EvaluatorTest extends TestCase
             self::SOURCE_IDENTIFIER,
             null,
             null,
-            1440,
+            86400,
             $this->now()
         );
 

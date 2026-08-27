@@ -17,6 +17,8 @@ use Watchtower\Connector\Model\AdminAuthFailure\Evaluator as AdminAuthFailureEva
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
+use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
+use Watchtower\Connector\Model\CronJobObservation\JobRunObservationRepository;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
 use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
 use Watchtower\Connector\Model\IndexerHealth\Evaluator as IndexerHealthEvaluator;
@@ -110,6 +112,8 @@ class ReportingService
      * @param ConnectorVersionStateRepository $connectorVersionStateRepository
      * @param IndexerHealthEvaluator $indexerHealthEvaluator
      * @param QueueHealthEvaluator $queueHealthEvaluator
+     * @param JobRunObservationRepository $jobRunObservationRepository measured run history behind the threshold
+     * @param CadenceEstimator $cadenceEstimator
      */
     public function __construct(
         private readonly Config $config,
@@ -142,7 +146,40 @@ class ReportingService
         // parameter mid-list silently shifts a dozen unrelated arguments.
         private readonly IndexerHealthEvaluator $indexerHealthEvaluator,
         private readonly QueueHealthEvaluator $queueHealthEvaluator,
+        private readonly JobRunObservationRepository $jobRunObservationRepository,
+        private readonly CadenceEstimator $cadenceEstimator,
     ) {
+    }
+
+    /**
+     * How long this source's last success may go unrenewed before it is stalled.
+     *
+     * Derived from what the job has actually been measured doing rather than
+     * from a hand-typed interval. The retired field defaulted to 60 minutes,
+     * which put a healthy nightly ERP sync in SevereDrop for 23 hours out of
+     * every 24, and no merchant could reasonably be expected to get that
+     * number right for every integration they run.
+     *
+     * Null means the cadence is not established yet, which the evaluator
+     * reports as INSUFFICIENT_DATA rather than guessing a window.
+     *
+     * Only cron jobs are measurable this way. A queue consumer's activity is
+     * read from magento_operation and a convention event's from the
+     * merchant's own dispatches, neither of which the run recorder watches,
+     * so both keep the interval their configuration already carries.
+     *
+     * @param IntegrationHealthConfig $config
+     * @return int|null
+     */
+    private function thresholdSecondsFor(IntegrationHealthConfig $config): ?int
+    {
+        if ($config->sourceType !== IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB) {
+            return $config->expectedMaxIntervalMinutes * 60;
+        }
+
+        return $this->cadenceEstimator
+            ->estimate($this->jobRunObservationRepository->get($config->sourceIdentifier))
+            ->thresholdSeconds;
     }
 
     /**
@@ -611,7 +648,7 @@ class ReportingService
             $config->sourceIdentifier,
             $observation->latestSuccessAt,
             $observation->latestFailureAt,
-            $config->expectedMaxIntervalMinutes,
+            $this->thresholdSecondsFor($config),
             $now
         );
     }

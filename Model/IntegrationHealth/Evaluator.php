@@ -56,7 +56,7 @@ class Evaluator
      * @param string $sourceIdentifier the source currently configured for this store view
      * @param \DateTimeImmutable|null $observedSuccessAt latest success observed THIS tick, if any
      * @param \DateTimeImmutable|null $observedFailureAt latest failure observed THIS tick, if any
-     * @param int $expectedMaxIntervalMinutes this store view's own configured expected-max-interval
+     * @param int|null $thresholdSeconds derived from observed cadence; null while it is still being learned
      * @param \DateTimeImmutable $now
      * @return MetricReport
      */
@@ -67,7 +67,7 @@ class Evaluator
         string $sourceIdentifier,
         ?\DateTimeImmutable $observedSuccessAt,
         ?\DateTimeImmutable $observedFailureAt,
-        int $expectedMaxIntervalMinutes,
+        ?int $thresholdSeconds,
         \DateTimeImmutable $now
     ): MetricReport {
         $state = $this->repository->get($storeViewId);
@@ -84,11 +84,19 @@ class Evaluator
         // a success/failure from several ticks ago.
         $lastSuccessAt = $observedSuccessAt ?? $state->lastSuccessAt;
         $lastFailureAt = $observedFailureAt ?? $state->lastFailureAt;
+
+        // Too few runs measured to know this source's rhythm, so there is no
+        // honest window to judge it against yet. Evidence keeps accumulating;
+        // only the verdict is withheld.
+        if ($thresholdSeconds === null) {
+            return $this->reportLearning($storeViewId, $storeViewCode, $state, $lastSuccessAt, $lastFailureAt, $now);
+        }
+
         $rawStatus = $this->rawStatus(
             $lastSuccessAt,
             $lastFailureAt,
             $state->observingSince,
-            $expectedMaxIntervalMinutes,
+            $thresholdSeconds,
             $now
         );
 
@@ -154,6 +162,55 @@ class Evaluator
             $sourceType,
             $sourceIdentifier,
             $now
+        );
+
+        return $this->report(
+            $storeViewCode,
+            SignalStatus::InsufficientData,
+            $state->sequenceNumber,
+            $now,
+            ReportReason::Heartbeat
+        );
+    }
+
+    /**
+     * Reports INSUFFICIENT_DATA for a source whose cadence has not been established yet.
+     *
+     * Heartbeat rather than Transition, for the same reason seedForSource()
+     * is: the platform alerts on any transition, INSUFFICIENT_DATA included,
+     * and "still measuring" is not something a merchant can act on.
+     *
+     * Evidence timestamps are still carried forward, so that the moment
+     * enough runs accumulate the first real evaluation has the full history
+     * behind it rather than starting blind.
+     *
+     * @param int $storeViewId
+     * @param string $storeViewCode
+     * @param IntegrationHealthState $state
+     * @param \DateTimeImmutable|null $lastSuccessAt
+     * @param \DateTimeImmutable|null $lastFailureAt
+     * @param \DateTimeImmutable $now
+     * @return MetricReport
+     */
+    private function reportLearning(
+        int $storeViewId,
+        string $storeViewCode,
+        IntegrationHealthState $state,
+        ?\DateTimeImmutable $lastSuccessAt,
+        ?\DateTimeImmutable $lastFailureAt,
+        \DateTimeImmutable $now
+    ): MetricReport {
+        $this->save(
+            $storeViewId,
+            $lastSuccessAt,
+            $lastFailureAt,
+            null,
+            SignalStatus::InsufficientData,
+            $state->sequenceNumber + 1,
+            ReportReason::Heartbeat,
+            $state->sourceType,
+            $state->sourceIdentifier,
+            $state->observingSince
         );
 
         return $this->report(
@@ -236,7 +293,7 @@ class Evaluator
      * @param \DateTimeImmutable|null $lastSuccessAt
      * @param \DateTimeImmutable|null $lastFailureAt
      * @param \DateTimeImmutable|null $observingSince null on a pre-fingerprint row: grace already elapsed
-     * @param int $expectedMaxIntervalMinutes
+     * @param int $thresholdSeconds
      * @param \DateTimeImmutable $now
      * @return SignalStatus
      */
@@ -244,10 +301,10 @@ class Evaluator
         ?\DateTimeImmutable $lastSuccessAt,
         ?\DateTimeImmutable $lastFailureAt,
         ?\DateTimeImmutable $observingSince,
-        int $expectedMaxIntervalMinutes,
+        int $thresholdSeconds,
         \DateTimeImmutable $now
     ): SignalStatus {
-        $window = $now->modify('-' . $expectedMaxIntervalMinutes . ' minutes');
+        $window = $now->modify('-' . $thresholdSeconds . ' seconds');
 
         if ($lastSuccessAt !== null && $lastSuccessAt >= $window) {
             return SignalStatus::Normal;

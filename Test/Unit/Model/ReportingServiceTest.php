@@ -23,6 +23,9 @@ use Watchtower\Connector\Model\Buffer\BufferedReport;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
+use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
+use Watchtower\Connector\Model\CronJobObservation\JobRunObservation;
+use Watchtower\Connector\Model\CronJobObservation\JobRunObservationRepository;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcomeRepository;
 use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\ConnectorVersionStateRepository;
@@ -1343,7 +1346,9 @@ class ReportingServiceTest extends TestCase
                 'watchtower_example_cron',
                 $observation->latestSuccessAt,
                 $observation->latestFailureAt,
-                60,
+                // This test is about source dispatch. Where the threshold
+                // comes from is covered on its own, below.
+                self::anything(),
                 self::isInstanceOf(\DateTimeImmutable::class)
             )
             ->willReturn($integrationHealthReport);
@@ -1382,6 +1387,62 @@ class ReportingServiceTest extends TestCase
         )->run();
 
         self::assertContains($integrationHealthReport, $outcome['storeViewReports']);
+    }
+
+    /**
+     * The defect this whole redesign exists for. A nightly ERP sync judged
+     * against the retired hand-typed 60-minute default sat in SEVERE_DROP for
+     * 23 hours out of every 24 while perfectly healthy, because a success at
+     * 02:00 is outside a one-hour window for the rest of the day. The window
+     * has to come from what the job was measured doing, not from a number the
+     * merchant was asked to guess.
+     */
+    public function testANightlyJobIsJudgedAgainstItsMeasuredCadenceNotTheConfiguredInterval(): void
+    {
+        $day = 86400;
+        $observationRepository = $this->createStub(JobRunObservationRepository::class);
+        $observationRepository->method('get')->willReturn(new JobRunObservation(
+            jobCode: 'nightly_erp_sync',
+            firstObservedAt: new \DateTimeImmutable('2026-08-01T02:00:00+00:00'),
+            lastSuccessAt: new \DateTimeImmutable('2026-08-13T02:00:00+00:00'),
+            observedRunCount: 9,
+            gapSamples: array_fill(0, 8, $day),
+        ));
+
+        $threshold = null;
+        $this->runWithIntegrationHealthSource(
+            IntegrationHealthConfig::SOURCE_TYPE_CRON_JOB,
+            'nightly_erp_sync',
+            $observationRepository,
+            $threshold
+        );
+
+        self::assertNotNull($threshold, 'A job measured this often must yield a threshold, not the learning state.');
+        self::assertGreaterThan(
+            $day,
+            $threshold,
+            'A nightly job must be given a window beyond a day, never the 60 minutes its configuration still carries.'
+        );
+    }
+
+    /**
+     * Only cron jobs are measurable this way. A queue consumer's activity is
+     * read from magento_operation and a convention event's from the merchant's
+     * own dispatches, neither of which the run recorder watches, so both keep
+     * the interval their configuration already carries.
+     */
+    public function testANonCronSourceKeepsTheIntervalItsConfigurationCarries(): void
+    {
+        $threshold = null;
+        $this->runWithIntegrationHealthSource(
+            IntegrationHealthConfig::SOURCE_TYPE_QUEUE_CONSUMER,
+            'async.operations.all',
+            null,
+            $threshold
+        );
+
+        // The helper configures 60 minutes.
+        self::assertSame(3600, $threshold);
     }
 
     /**
@@ -1801,8 +1862,12 @@ class ReportingServiceTest extends TestCase
      * @param string $sourceIdentifier
      * @return array{report: MetricReport, storeViewReports: MetricReport[]}
      */
-    private function runWithIntegrationHealthSource(string $sourceType, string $sourceIdentifier): array
-    {
+    private function runWithIntegrationHealthSource(
+        string $sourceType,
+        string $sourceIdentifier,
+        ?JobRunObservationRepository $jobRunObservationRepository = null,
+        ?int &$capturedThreshold = null
+    ): array {
         $config = $this->configuredAndEnabled();
         $cronHealthReport = $this->report(sequenceNumber: 1);
 
@@ -1852,7 +1917,14 @@ class ReportingServiceTest extends TestCase
 
         $integrationHealthReport = $this->integrationHealthReport('default');
         $integrationHealthEvaluator = $this->createStub(IntegrationHealthEvaluator::class);
-        $integrationHealthEvaluator->method('evaluate')->willReturn($integrationHealthReport);
+        $integrationHealthEvaluator->method('evaluate')->willReturnCallback(
+            function (...$arguments) use ($integrationHealthReport, &$capturedThreshold): MetricReport {
+                // Positional: the threshold is evaluate()'s 7th parameter.
+                $capturedThreshold = $arguments[6];
+
+                return $integrationHealthReport;
+            }
+        );
 
         $bufferRepository = $this->createStub(ReportBufferRepository::class);
         $bufferRepository->method('discardExpired')->willReturn(0);
@@ -1878,6 +1950,7 @@ class ReportingServiceTest extends TestCase
             cronJobObserver: $cronJobObserver,
             queueConsumerObserver: $queueConsumerObserver,
             conventionEventReader: $conventionEventReader,
+            jobRunObservationRepository: $jobRunObservationRepository,
         )->run();
 
         return ['report' => $integrationHealthReport, 'storeViewReports' => $outcome['storeViewReports']];
@@ -2022,6 +2095,7 @@ class ReportingServiceTest extends TestCase
         ?SubmissionOutcomeRepository $submissionOutcomeRepository = null,
         ?ConnectorVersionCheckService $connectorVersionCheckService = null,
         ?ConnectorVersionStateRepository $connectorVersionStateRepository = null,
+        ?JobRunObservationRepository $jobRunObservationRepository = null,
     ): ReportingService {
         if ($storeManager === null) {
             $storeManager = $this->createStub(StoreManagerInterface::class);
@@ -2112,6 +2186,8 @@ class ReportingServiceTest extends TestCase
             $connectorVersionStateRepository,
             $indexerHealthEvaluator,
             $queueHealthEvaluator,
+            $jobRunObservationRepository ?? $this->createStub(JobRunObservationRepository::class),
+            new CadenceEstimator(),
         );
     }
 
