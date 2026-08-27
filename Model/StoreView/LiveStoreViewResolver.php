@@ -20,9 +20,8 @@ use Magento\Store\Model\StoreManagerInterface;
  * originated in StoreViewSyncService's own B1 fix (C0/C1) -- a real billing-
  * scoping bug where a merchant-disabled store view was synced as "live" and
  * bumped metered Stripe billing quantity for a storefront that wasn't
- * running -- then got copied into ReportingService::liveStores(),
- * IntegrationHealthConfigValidator::liveStoreViewIds(), and
- * Block/Adminhtml/IntegrationHealth/Sources::getLiveStoreViews() under this
+ * running -- then got copied into ReportingService::liveStores() and twice
+ * more into the since-retired integration_health source picker, under this
  * module's own "rule of three" tolerance for small duplicated logic.
  * Extracted here (C4's own architect review) once a fourth copy made the
  * drift risk on a billing-scoping invariant no longer tolerable; all four

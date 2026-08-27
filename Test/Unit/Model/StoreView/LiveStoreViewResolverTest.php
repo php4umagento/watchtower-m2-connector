@@ -16,7 +16,7 @@ use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 /**
  * Dedicated coverage for the shared is_active filter, rather than
  * relying on whatever incidentally exercises it via its three callers
- * (ReportingService, IntegrationHealthConfigValidator,
+ * (ReportingService, the since-retired source picker,
  * Block/Adminhtml/IntegrationHealth/Sources).
  */
 class LiveStoreViewResolverTest extends TestCase

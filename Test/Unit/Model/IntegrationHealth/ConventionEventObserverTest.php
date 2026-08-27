@@ -154,7 +154,7 @@ class ConventionEventObserverTest extends TestCase
      * be dropped for the same reason as an unrecognized status: it can
      * never be recorded without a fatal, and it could never match a real
      * admin-configured source_identifier anyway (that's also capped at 64
-     * characters for convention_event, see IntegrationHealthConfigValidator).
+     * characters for convention_event, matching the column bound).
      */
     public function testAnOversizedIntegrationLabelIsDroppedRatherThanRecorded(): void
     {

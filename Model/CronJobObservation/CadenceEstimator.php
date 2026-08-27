@@ -37,9 +37,8 @@ class CadenceEstimator
     private const MIN_THRESHOLD_SECONDS = 3600;
 
     /**
-     * 30 days, carried over from the bound the retired
-     * IntegrationHealthConfigValidator::MAX_EXPECTED_MAX_INTERVAL_MINUTES
-     * enforced on the hand-typed field this replaces.
+     * 30 days, carried over from the bound the retired hand-typed
+     * expected-max-interval field enforced.
      */
     private const MAX_THRESHOLD_SECONDS = 2592000;
 
