@@ -239,6 +239,59 @@ Rejected alternatives, recorded so they are not relitigated by accident:
   problem at the root, but needs a spec change and drops the genuinely
   per-store-view case of a different ERP per country storefront.
 
+## Open: restoring the convention event
+
+Shipped as of 1.25.0 without a path to the `watchtower_integration_health`
+convention event. The observer still records dispatches and the reader still
+works, so nothing is broken, but there is no way to *select* one, which
+withdraws the escape hatch for integrations that run no cron at all. That is
+the ERP-pushes-into-Magento shape, so it should come back.
+
+Two things about the design were only settled by checking, and both make this
+smaller than it first looks.
+
+**Event cadence is measurable, so events need no configured interval either.**
+`watchtower_integration_health_event` stores one row per dispatch with an
+`observed_at`, indexed on `(store_view_id, integration_label, status,
+observed_at)`. It is a history table, not a latest-only row, so the gaps
+between dispatches can feed the existing `CadenceEstimator` unchanged. Same
+threshold rule, same learning state, different evidence source. Do not
+reintroduce a typed interval for events.
+
+**There is no state-row conflict.** The concern was that events are per store
+view while the watched set is install-level, implying a second evaluation path
+writing the same `watchtower_integration_health_state` row. It does not:
+`WatchedSetEvaluator::evaluate()` already receives `$storeViewId`, so event
+labels fold into the same worst-of as the cron jobs. One state row, one
+debounce, one status per store view, exactly as now.
+
+Implementation, in order:
+
+1. `WatchedIntegrationRepository`: add `WATCH_TYPE_EVENT`, a
+   `watchedEventLabels()` reader, and a third argument to `save()`. The column
+   is already `varchar(16)`, so no schema change.
+2. `WatchedJobResolver`: return event labels alongside job codes. They are not
+   expanded from modules, so they pass through untouched.
+3. `WatchedSetEvaluator`: for each watched label, read
+   `IntegrationHealthEventRepository::latestObservation($storeViewId, $label,
+   $now)` and derive its threshold from that label's dispatch gaps. Fold the
+   result into `worstOf()`. Include the labels in `fingerprint()` so changing
+   them re-seeds.
+4. Migration: `MigrateIntegrationHealthSources` currently logs
+   `convention_event` rows as unmigratable. Carry them over instead, and drop
+   that half of the warning.
+5. Admin: a free-text label field, offering labels already seen in the event
+   table. Offering observed labels matters more than it sounds, because a
+   typo produces silence forever with no feedback, which is the failure this
+   whole redesign exists to remove.
+6. Spec: update `connector-metrics-spec.md` 2.14, which currently records this
+   as an open gap, and the docs article in `DocsSeeder.php`, which deliberately
+   does not mention events yet.
+
+The `queue_consumer` source stays retired. The evidence against it (zero
+`magento_operation` rows on vanilla, no third-party consumers on the production
+store checked) is unchanged.
+
 ## Migration
 
 Existing `watchtower_integration_health_config` rows must not silently stop
