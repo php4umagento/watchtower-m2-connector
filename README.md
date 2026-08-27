@@ -6,6 +6,10 @@ insufficient data) to the Watchtower platform, so a merchant learns about a
 broken checkout, a stalled integration, or a silent cron scheduler before a
 customer complains.
 
+The platform side lives at **[watchtower-commerce.com](https://watchtower-commerce.com)**;
+its [documentation](https://watchtower-commerce.com/docs) covers connecting a
+store, finding your API key, and what each signal means.
+
 ## How it works
 
 All detection runs **locally, inside your store**: baseline computation,
@@ -22,11 +26,26 @@ Tracked signals:
 - **`checkout`**, **`basket_quote`**, **`customer_account`** — rate-based
   signals comparing this hour's activity against your store's own historical
   baseline for the same hour of day.
+- **`checkout_failure`** — the share of order placements that fail, against
+  fixed thresholds rather than a baseline, so it works from the first hour on a
+  store of any size.
+- **`admin_auth_failure`** — failed admin sign-ins, likewise threshold-based.
+  Install-scoped, since the admin panel is one per installation.
 - **`integration_health`** — an optional signal for the integrations you
   choose to watch. The connector finds the scheduled jobs your store runs,
   groups them under the extension that ships them, and measures how often each
   really runs so there is no interval to configure. Integrations that run no
   cron at all can emit a convention event instead.
+- **`indexer_health`** — are the indexers current, and is the materialized-view
+  backlog actually draining? Install-scoped.
+- **`queue_health`** — is queued work being drained, rather than sitting with
+  no consumer attached? Depth is never the judgement: a bulk import that queues
+  tens of thousands of messages is healthy while something is working through
+  them. Install-scoped.
+
+`cron_health`, `admin_auth_failure`, `indexer_health` and `queue_health` are
+**install-scoped**: they describe the whole Magento installation, not one store
+view. The rest are reported per store view.
 
 ## Requirements
 
@@ -146,7 +165,11 @@ doesn't necessarily mean every other signal's detection logic changed too:
 
 - `cron_health` — `Model/CronHealth/Evaluator::RULESET_VERSION`
 - `checkout` / `basket_quote` / `customer_account` — `Model/RateSignal/DispersionEvaluator::RULESET_VERSION`
+- `checkout_failure` — `Model/CheckoutFailure/Evaluator::RULESET_VERSION`
+- `admin_auth_failure` — `Model/AdminAuthFailure/Evaluator::RULESET_VERSION`
 - `integration_health` — `Model/IntegrationHealth/WatchedSetEvaluator::RULESET_VERSION`
+- `indexer_health` — `Model/IndexerHealth/Evaluator::RULESET_VERSION`
+- `queue_health` — `Model/QueueHealth/Evaluator::RULESET_VERSION`
 
 Each is reported per-signal on every submitted report, so the platform
 always knows exactly which baseline logic produced a given status — a
