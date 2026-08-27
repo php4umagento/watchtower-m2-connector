@@ -14,6 +14,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedSetEvaluator;
 use Watchtower\Connector\Model\QueueHealth\QueueStateObserver;
 use Watchtower\Connector\Model\Seed\SeedCoverageLabel;
 
@@ -34,6 +36,8 @@ class StatusCommand extends Command
      * @param DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider
      * @param SeedCoverageLabel $seedCoverageLabel
      * @param QueueStateObserver $queueStateObserver
+     * @param WatchedJobResolver $watchedJobResolver
+     * @param WatchedSetEvaluator $watchedSetEvaluator
      * @param string|null $name
      */
     public function __construct(
@@ -41,6 +45,8 @@ class StatusCommand extends Command
         private readonly DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider,
         private readonly SeedCoverageLabel $seedCoverageLabel,
         private readonly QueueStateObserver $queueStateObserver,
+        private readonly WatchedJobResolver $watchedJobResolver,
+        private readonly WatchedSetEvaluator $watchedSetEvaluator,
         ?string $name = null
     ) {
         parent::__construct($name);
@@ -158,6 +164,40 @@ class StatusCommand extends Command
     }
 
     /**
+     * Names the integrations behind an unhealthy integration_health status.
+     *
+     * The wire payload carries one worst-of status per store view, so this is
+     * the only place a merchant can find out which of the integrations they
+     * watch is actually at fault. Same split queue_health above already makes.
+     *
+     * @param OutputInterface $output
+     * @return void
+     */
+    private function printIntegrationHealthDetail(OutputInterface $output): void
+    {
+        $watched = $this->watchedJobResolver->resolve();
+
+        if ($watched === []) {
+            $output->writeln('integration_health: no integrations selected, so this signal is not evaluated');
+
+            return;
+        }
+
+        $unhealthy = $this->watchedSetEvaluator->unhealthyJobCodes(
+            $watched,
+            new \DateTimeImmutable('now', new \DateTimeZone('UTC'))
+        );
+
+        $output->writeln(sprintf(
+            'integration_health: watching %d, %s',
+            count($watched),
+            $unhealthy === []
+                ? 'none currently failing'
+                : 'currently failing: '.implode(', ', $unhealthy)
+        ));
+    }
+
+    /**
      * Prints cron_health plus every live store view's own per-category signal status.
      *
      * @param OutputInterface $output
@@ -174,6 +214,7 @@ class StatusCommand extends Command
         ));
 
         $this->printQueueHealthDetail($output);
+        $this->printIntegrationHealthDetail($output);
 
         foreach ($snapshot->storeViews as $storeView) {
             $output->writeln(sprintf('Store view "%s" (id=%d):', $storeView->storeViewCode, $storeView->storeViewId));

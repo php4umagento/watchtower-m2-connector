@@ -23,6 +23,8 @@ use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
 use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\EnvironmentState;
 use Watchtower\Connector\Model\QueueHealth\Observation as QueueHealthObservation;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedSetEvaluator;
 use Watchtower\Connector\Model\QueueHealth\QueueStateObserver;
 use Watchtower\Connector\Model\Seed\SeedCoverageLabel;
 
@@ -374,8 +376,40 @@ class StatusCommandTest extends TestCase
         );
     }
 
-    private function command(?Config $config = null, ?DiagnosticsSnapshot $snapshot = null): StatusCommand
+    /**
+     * The wire payload carries one worst-of status per store view, so this
+     * line is the only way a merchant learns which integration is at fault.
+     */
+    public function testNamesTheFailingIntegrationsAndNotTheHealthyOnes(): void
     {
+        $resolver = $this->createStub(WatchedJobResolver::class);
+        $resolver->method('resolve')->willReturn(['ebizmarts_ecommerce', 'ess_m2epro']);
+
+        $evaluator = $this->createStub(WatchedSetEvaluator::class);
+        $evaluator->method('unhealthyJobCodes')->willReturn(['ess_m2epro']);
+
+        $tester = new CommandTester($this->command(watchedJobResolver: $resolver, watchedSetEvaluator: $evaluator));
+        $tester->execute([]);
+
+        self::assertStringContainsString('watching 2', $tester->getDisplay());
+        self::assertStringContainsString('currently failing: ess_m2epro', $tester->getDisplay());
+        self::assertStringNotContainsString('ebizmarts_ecommerce', $tester->getDisplay());
+    }
+
+    public function testSaysTheSignalIsNotEvaluatedWhenNothingIsWatched(): void
+    {
+        $tester = new CommandTester($this->command());
+        $tester->execute([]);
+
+        self::assertStringContainsString('no integrations selected', $tester->getDisplay());
+    }
+
+    private function command(
+        ?Config $config = null,
+        ?DiagnosticsSnapshot $snapshot = null,
+        ?WatchedJobResolver $watchedJobResolver = null,
+        ?WatchedSetEvaluator $watchedSetEvaluator = null
+    ): StatusCommand {
         if ($config === null) {
             $config = $this->createStub(Config::class);
             $config->method('isConfigured')->willReturn(true);
@@ -409,6 +443,16 @@ class StatusCommandTest extends TestCase
             new QueueHealthObservation(undrainedSince: null, undrainedWithoutOnset: false)
         );
 
-        return new StatusCommand($config, $provider, new SeedCoverageLabel(), $queueStateObserver);
+        // Nothing watched by default, so the integration_health detail line
+        // renders its "not evaluated" branch. The rollup itself is covered by
+        // WatchedSetEvaluatorTest.
+        return new StatusCommand(
+            $config,
+            $provider,
+            new SeedCoverageLabel(),
+            $queueStateObserver,
+            $watchedJobResolver ?? $this->createStub(WatchedJobResolver::class),
+            $watchedSetEvaluator ?? $this->createStub(WatchedSetEvaluator::class)
+        );
     }
 }
