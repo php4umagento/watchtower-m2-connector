@@ -239,102 +239,54 @@ Rejected alternatives, recorded so they are not relitigated by accident:
   problem at the root, but needs a spec change and drops the genuinely
   per-store-view case of a different ERP per country storefront.
 
-## Open: restoring the convention event
+## Shipped: convention events and the retirement
 
-Shipped as of 1.25.0 without a path to the `watchtower_integration_health`
-convention event. The observer still records dispatches and the reader still
-works, so nothing is broken, but there is no way to *select* one, which
-withdraws the escape hatch for integrations that run no cron at all. That is
-the ERP-pushes-into-Magento shape, so it should come back.
+Both sections that used to sit here are done, and the detail worth keeping is
+recorded where it belongs rather than in a plan.
 
-Two things about the design were only settled by checking, and both make this
-smaller than it first looks.
+**Convention events** (1.25.0 backend, 1.26.0 picker). Two things settled by
+reading the code rather than reasoning. `watchtower_integration_health_event`
+stores one row per dispatch, so the gaps between them feed the same
+`CadenceEstimator` the cron side uses and events need no typed interval either.
+And there was no state-row conflict: `WatchedSetEvaluator::evaluate()` already
+received the store view id, so labels fold into the same worst-of and the same
+debounce.
 
-**Event cadence is measurable, so events need no configured interval either.**
-`watchtower_integration_health_event` stores one row per dispatch with an
-`observed_at`, indexed on `(store_view_id, integration_label, status,
-observed_at)`. It is a history table, not a latest-only row, so the gaps
-between dispatches can feed the existing `CadenceEstimator` unchanged. Same
-threshold rule, same learning state, different evidence source. Do not
-reintroduce a typed interval for events.
+The picker offers **only labels already seen dispatched**, never free text. An
+earlier draft of this plan proposed a text field with suggestions; that was
+rejected because a mistyped label sits in the watched set forever matching
+nothing, reporting healthy while the integration it covered is dead. The
+accepted cost is that nothing can be selected until the merchant's module has
+dispatched once.
 
-**There is no state-row conflict.** The concern was that events are per store
-view while the watched set is install-level, implying a second evaluation path
-writing the same `watchtower_integration_health_state` row. It does not:
-`WatchedSetEvaluator::evaluate()` already receives `$storeViewId`, so event
-labels fold into the same worst-of as the cron jobs. One state row, one
-debounce, one status per store view, exactly as now.
+**The retirement** (1.27.0). One behaviour had to be carried across rather than
+deleted with the rest: the old path kept a store view whose source had been
+cleared heartbeating its last known status, because the platform's staleness
+sweep has no concept of a deliberately retired signal and silence would alert
+forever. Emptying the watched set is the same situation, so
+`heartbeatRetiredIfPreviouslyReported()` moved to `WatchedSetEvaluator`.
+Deleting the fallback without it would have turned unticking everything into a
+permanent false alert.
 
-Implementation, in order:
+`queue_consumer` stays retired. The evidence against it is unchanged: zero
+`magento_operation` rows on vanilla 2.4.8, no third-party consumers on the
+production store checked.
 
-1. ~~`WatchedIntegrationRepository`: `WATCH_TYPE_EVENT`, `watchedEventLabels()`,
-   third argument to `save()`.~~ **Done.** A null event list means "leave event
-   entries alone", so the admin controller cannot delete one it cannot yet edit.
-2. ~~`WatchedJobResolver`: return event labels alongside job codes.~~ **Done**,
-   as `resolveEventLabels()`.
-3. ~~`WatchedSetEvaluator`: fold labels into `worstOf()` and `fingerprint()`,
-   deriving each threshold from its dispatch gaps.~~ **Done**, via
-   `IntegrationHealthEventRepository::successGapSeconds()`.
-4. ~~Migration: carry `convention_event` rows over.~~ **Done.** Only
-   `queue_consumer` remains unmigratable.
-5. **Admin: still to do.** A free-text label field, offering labels already
-   seen in the event table. Offering observed labels matters more than it
-   sounds, because a typo produces silence forever with no feedback, which is
-   the failure this whole redesign exists to remove. Until this lands, events
-   arrive only by migration and cannot be added on a fresh install.
-6. **Spec: still to do.** `connector-metrics-spec.md` 2.14 records this as an
-   open gap and the docs article in `DocsSeeder.php` does not mention events;
-   both should be updated once step 5 makes the feature reachable.
+## Still open: calibrate the cadence constants
 
-Also outstanding: `WatchedSetEvaluator::unhealthyJobCodes()`, which
-`watchtower:status` reads, still covers cron jobs only. An unhealthy event
-drives the rolled-up status correctly but is not named in the local detail
-line.
+`MIN_GAP_SAMPLES`, the p95 and median multipliers and the one-hour floor in
+`CadenceEstimator` all shipped as **proposals**. The floor's reasoning is
+sound, since the platform evaluates hourly with a two-evaluation debounce, but
+none of the numbers has been checked against a spread of real integrations.
 
-The `queue_consumer` source stays retired. The evidence against it (zero
-`magento_operation` rows on vanilla, no third-party consumers on the production
-store checked) is unchanged.
+Cadence never crosses the wire, so the platform cannot see it: calibration has
+to happen on an install. The local test installs are near-vanilla and would
+only show core housekeeping on tidy schedules, which is the easy case. Avalon
+Guns is the intended source, being the store whose data already exposed three
+wrong assumptions in this redesign.
 
-## Open: retiring the old model
-
-No merchant install carries the retired per-store-view configuration, which
-removes the constraint the rest of this section was written around. Nothing has
-to be preserved, so the whole old path goes at once rather than in the careful
-sequence a live install would have forced.
-
-`AvailableSourcesProvider` and `IntegrationHealthConfigValidator` are already
-deleted. What remains, in order:
-
-1. **Delete `MigrateIntegrationHealthSources` and its test.** It exists only to
-   rescue rows nobody has. It cannot be deleted on its own, though: while
-   `ReportingService` still falls back to the old configuration, removing the
-   migration would leave an install that had config working through the
-   fallback and never moving off it, which is worse than either end state.
-   Steps 1 and 2 land together.
-2. **Remove `ReportingService`'s pre-migration fallback**, along with
-   `observeConfiguredSource()` and `snapshotIntegrationHealthEvidence()`. The
-   observation and event tables own that evidence now, so the every-tick call
-   in `Cron\ReportJob` goes too.
-3. **Repoint `DiagnosticsSnapshotProvider`**, which still asks the config
-   repository whether a store view has integration_health configured. It should
-   ask the watched set instead.
-4. **Delete** `IntegrationHealthConfigRepository`, `IntegrationHealthConfig`,
-   the per-source `IntegrationHealth\Evaluator`, `QueueConsumerObserver` and
-   `ConventionEventReader`, with their tests.
-5. **Drop `watchtower_integration_health_config`** from `db_schema.xml`. Its
-   `db_schema_whitelist.json` entry stays, per the additive-never-pruned rule.
-   With no migration left there is no ordering problem; had one survived, the
-   table could not be dropped in the same release, because declarative schema
-   applies before data patches and the patch would find nothing.
-
-The bulk of the effort is test surgery rather than production code: about 45
-references and a dozen legacy-path test methods in `ReportingServiceTest`, plus
-`ReportingCyclePerfTest` and `DiagnosticsSnapshotProviderTest`, all of which
-construct the service positionally or by name with dependencies that are going
-away.
-
-`CronJobObserver`, `IntegrationHealthEventRepository`, `ConventionEventObserver`
-and `IntegrationHealthState`/its repository all stay: the new path uses them.
+This is the only outstanding item that can mislead a merchant rather than just
+leave tidy-up behind.
 
 ## Migration
 
