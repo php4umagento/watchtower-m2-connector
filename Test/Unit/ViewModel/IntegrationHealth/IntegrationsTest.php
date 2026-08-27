@@ -18,6 +18,8 @@ use Watchtower\Connector\Model\IntegrationHealth\DiscoveredJob;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationDiscovery;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
 use Watchtower\Connector\ViewModel\IntegrationHealth\CadenceDescriber;
+use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthEventRepository;
 use Watchtower\Connector\ViewModel\IntegrationHealth\Integrations;
 
 /**
@@ -194,7 +196,9 @@ class IntegrationsTest extends TestCase
             $this->watchedRepository(),
             new CadenceDescriber(),
             $this->createStub(UrlInterface::class),
-            $this->createStub(FormKey::class)
+            $this->createStub(FormKey::class),
+            $this->createStub(IntegrationHealthEventRepository::class),
+            new CadenceEstimator()
         );
 
         $viewModel->getAddedIntegrations();
@@ -221,7 +225,9 @@ class IntegrationsTest extends TestCase
             $this->watchedRepository($watchedModules, $watchedJobCodes),
             new CadenceDescriber(),
             $this->createStub(UrlInterface::class),
-            $this->createStub(FormKey::class)
+            $this->createStub(FormKey::class),
+            $this->createStub(IntegrationHealthEventRepository::class),
+            new CadenceEstimator()
         );
     }
 

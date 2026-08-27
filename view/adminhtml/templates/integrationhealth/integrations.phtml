@@ -147,6 +147,45 @@ $rowIndex = 0;
             </details>
         <?php endforeach; ?>
 
+        <?php $eventLabels = $viewModel->getObservedEventLabels(); ?>
+        <details class="details admin__collapsible-block-wrapper"<?= $eventLabels !== [] ? ' open' : '' ?>>
+            <summary class="details-summary admin__collapsible-title">
+                <span><?= $escaper->escapeHtml(__('Custom integrations')) ?></span>
+            </summary>
+            <div class="details-content admin__fieldset">
+                <?php if ($eventLabels === []): ?>
+                    <p class="watchtower-integration-note">
+                        <?= $escaper->escapeHtml(
+                            __('Nothing here yet. If your own code sends us a watchtower_integration_health '
+                                . 'event, it will appear here once we have seen it at least once.')
+                        ) ?>
+                    </p>
+                <?php else: ?>
+                    <?php foreach ($eventLabels as $eventLabel): ?>
+                        <div class="admin__fieldset-wrapper watchtower-integration">
+                            <div class="admin__field admin__field-option">
+                                <input type="checkbox"
+                                       class="admin__control-checkbox"
+                                       id="watched_event_<?= $escaper->escapeHtmlAttr($eventLabel) ?>"
+                                       name="watched_events[]"
+                                       value="<?= $escaper->escapeHtmlAttr($eventLabel) ?>"
+                                    <?= $viewModel->isEventWatched($eventLabel) ? 'checked="checked"' : '' ?>>
+                                <label class="admin__field-label"
+                                       for="watched_event_<?= $escaper->escapeHtmlAttr($eventLabel) ?>">
+                                    <strong><?= $escaper->escapeHtml($eventLabel) ?></strong>
+                                </label>
+                            </div>
+                            <div class="admin__field">
+                                <span class="watchtower-integration-note">
+                                    <?= $escaper->escapeHtml($viewModel->getEventCadenceLabel($eventLabel)) ?>
+                                </span>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+        </details>
+
         <div class="admin__field">
             <button type="submit" class="action-primary" data-role="save">
                 <span><?= $escaper->escapeHtml(__('Save')) ?></span>

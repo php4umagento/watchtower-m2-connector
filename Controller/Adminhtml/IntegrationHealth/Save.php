@@ -13,6 +13,7 @@ use Magento\Backend\App\Action\Context;
 use Magento\Backend\Model\View\Result\Redirect;
 use Magento\Framework\App\Action\HttpPostActionInterface;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationDiscovery;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthEventRepository;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
 
 /**
@@ -32,11 +33,13 @@ class Save extends Action implements HttpPostActionInterface
      * @param Context $context
      * @param IntegrationDiscovery $discovery
      * @param WatchedIntegrationRepository $watchedRepository
+     * @param IntegrationHealthEventRepository $eventRepository
      */
     public function __construct(
         Context $context,
         private readonly IntegrationDiscovery $discovery,
-        private readonly WatchedIntegrationRepository $watchedRepository
+        private readonly WatchedIntegrationRepository $watchedRepository,
+        private readonly IntegrationHealthEventRepository $eventRepository
     ) {
         parent::__construct($context);
     }
@@ -50,17 +53,22 @@ class Save extends Action implements HttpPostActionInterface
     {
         $submittedModules = $this->submitted('watched_modules');
         $submittedJobCodes = $this->submitted('watched_jobs');
+        $submittedEvents = $this->submitted('watched_events');
 
         [$offeredModules, $offeredJobCodes] = $this->offered();
+        $offeredEvents = array_keys($this->eventRepository->observedLabels());
 
         $modules = array_values(array_intersect($submittedModules, $offeredModules));
         $jobCodes = array_values(array_intersect($submittedJobCodes, $offeredJobCodes));
+        $eventLabels = array_values(array_intersect($submittedEvents, $offeredEvents));
 
-        $this->watchedRepository->save($modules, $jobCodes);
+        $this->watchedRepository->save($modules, $jobCodes, $eventLabels);
 
         $this->messageManager->addSuccessMessage((string) __('Saved. We are now watching your selected integrations.'));
 
-        $ignored = count($submittedModules) - count($modules) + count($submittedJobCodes) - count($jobCodes);
+        $ignored = count($submittedModules) - count($modules)
+            + count($submittedJobCodes) - count($jobCodes)
+            + count($submittedEvents) - count($eventLabels);
 
         if ($ignored > 0) {
             $this->messageManager->addWarningMessage((string) ($ignored === 1

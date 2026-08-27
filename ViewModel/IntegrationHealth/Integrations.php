@@ -14,7 +14,11 @@ use Magento\Framework\Phrase;
 use Magento\Framework\View\Element\Block\ArgumentInterface;
 use Watchtower\Connector\Model\IntegrationHealth\DiscoveredIntegration;
 use Watchtower\Connector\Model\IntegrationHealth\DiscoveredJob;
+use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
+use Watchtower\Connector\Model\CronJobObservation\CronJobRunRecorder;
+use Watchtower\Connector\Model\CronJobObservation\JobRunObservation;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationDiscovery;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthEventRepository;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
 
 /**
@@ -42,19 +46,101 @@ class Integrations implements ArgumentInterface
     private ?array $watchedJobCodes = null;
 
     /**
+     * @var array<string,int>|null label => dispatch count
+     */
+    private ?array $observedEvents = null;
+
+    /**
+     * @var array<string,true>|null
+     */
+    private ?array $watchedEventLabels = null;
+
+    /**
      * @param IntegrationDiscovery $discovery
      * @param WatchedIntegrationRepository $watchedRepository
      * @param CadenceDescriber $cadenceDescriber
      * @param UrlInterface $url
      * @param FormKey $formKey
+     * @param IntegrationHealthEventRepository $eventRepository
+     * @param CadenceEstimator $cadenceEstimator
      */
     public function __construct(
         private readonly IntegrationDiscovery $discovery,
         private readonly WatchedIntegrationRepository $watchedRepository,
         private readonly CadenceDescriber $cadenceDescriber,
         private readonly UrlInterface $url,
-        private readonly FormKey $formKey
+        private readonly FormKey $formKey,
+        private readonly IntegrationHealthEventRepository $eventRepository,
+        private readonly CadenceEstimator $cadenceEstimator
     ) {
+    }
+
+    /**
+     * Convention event labels this install has actually received, in order.
+     *
+     * Offered instead of a free-text field so a label can only ever be one the
+     * connector has really seen dispatched.
+     *
+     * @return string[]
+     */
+    public function getObservedEventLabels(): array
+    {
+        if ($this->observedEvents === null) {
+            $this->observedEvents = $this->eventRepository->observedLabels();
+        }
+
+        return array_keys($this->observedEvents);
+    }
+
+    /**
+     * Whether this event label is currently watched.
+     *
+     * @param string $label
+     * @return bool
+     */
+    public function isEventWatched(string $label): bool
+    {
+        if ($this->watchedEventLabels === null) {
+            $this->watchedEventLabels = array_fill_keys($this->watchedRepository->watchedEventLabels(), true);
+        }
+
+        return isset($this->watchedEventLabels[$label]);
+    }
+
+    /**
+     * How often this label is dispatched, phrased for the picker.
+     *
+     * Measured across every store view, for display only. Evaluation stays
+     * per store view, so a label dispatched at different rates per store view
+     * is judged separately even though one summary is shown here.
+     *
+     * @param string $label
+     * @return Phrase
+     */
+    public function getEventCadenceLabel(string $label): Phrase
+    {
+        return $this->cadenceDescriber->describe($this->cadenceEstimator->estimate(new JobRunObservation(
+            jobCode: $label,
+            firstObservedAt: new \DateTimeImmutable('now', new \DateTimeZone('UTC')),
+            lastSuccessAt: null,
+            observedRunCount: $this->observedEvents[$label] ?? 0,
+            gapSamples: $this->eventRepository->successGapSeconds(
+                null,
+                $label,
+                CronJobRunRecorder::MAX_GAP_SAMPLES
+            ),
+        )));
+    }
+
+    /**
+     * How many dispatches of this label have been recorded.
+     *
+     * @param string $label
+     * @return int
+     */
+    public function getEventDispatchCount(string $label): int
+    {
+        return $this->observedEvents[$label] ?? 0;
     }
 
     /**

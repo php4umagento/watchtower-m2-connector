@@ -83,32 +83,66 @@ class IntegrationHealthEventRepository
     }
 
     /**
+     * Every integration label seen dispatched on this install, with its dispatch count.
+     *
+     * The picker offers these rather than a free-text field, so a label can
+     * only ever be one the connector has really received. A typo would
+     * otherwise produce silence forever with no feedback.
+     *
+     * @return array<string,int> label => successful dispatches recorded
+     */
+    public function observedLabels(): array
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $table = $this->resourceConnection->getTableName(self::TABLE);
+
+        $rows = $connection->fetchAll(
+            $connection->select()
+                ->from($table, ['integration_label', 'dispatches' => new \Zend_Db_Expr('COUNT(*)')])
+                ->where('status = ?', 'ok')
+                ->group('integration_label')
+                ->order('integration_label ASC')
+        );
+
+        $labels = [];
+
+        foreach ($rows as $row) {
+            $labels[(string) $row['integration_label']] = (int) $row['dispatches'];
+        }
+
+        return $labels;
+    }
+
+    /**
      * Gaps in seconds between this label's recorded successes, oldest first.
      *
      * Lets a convention event derive its window the same way a cron job does,
      * so events need no typed interval either. This table keeps one row per
      * dispatch, so the history is already here.
      *
-     * @param int $storeViewId
+     * @param int|null $storeViewId null to measure across every store view, for display only
      * @param string $integrationLabel
      * @param int $limit most recent successes to measure across
      * @return int[]
      */
-    public function successGapSeconds(int $storeViewId, string $integrationLabel, int $limit): array
+    public function successGapSeconds(?int $storeViewId, string $integrationLabel, int $limit): array
     {
         $connection = $this->resourceConnection->getConnection();
         $table = $this->resourceConnection->getTableName(self::TABLE);
 
         // One extra row: N gaps need N+1 timestamps.
-        $observedAt = $connection->fetchCol(
-            $connection->select()
-                ->from($table, ['observed_at'])
-                ->where('store_view_id = ?', $storeViewId)
-                ->where('integration_label = ?', $integrationLabel)
-                ->where('status = ?', 'ok')
-                ->order('observed_at DESC')
-                ->limit($limit + 1)
-        );
+        $select = $connection->select()
+            ->from($table, ['observed_at'])
+            ->where('integration_label = ?', $integrationLabel)
+            ->where('status = ?', 'ok')
+            ->order('observed_at DESC')
+            ->limit($limit + 1);
+
+        if ($storeViewId !== null) {
+            $select->where('store_view_id = ?', $storeViewId);
+        }
+
+        $observedAt = $connection->fetchCol($select);
 
         $ascending = array_reverse(array_map(
             fn (string $value): int => $this->toUtc($value)->getTimestamp(),

@@ -15,6 +15,7 @@ use Magento\Framework\App\RequestInterface;
 use Magento\Framework\Message\ManagerInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthEventRepository;
 use Watchtower\Connector\Controller\Adminhtml\IntegrationHealth\Save;
 use Watchtower\Connector\Model\CronJobObservation\Cadence;
 use Watchtower\Connector\Model\IntegrationHealth\DiscoveredIntegration;
@@ -30,6 +31,11 @@ class SaveTest extends TestCase
     private array $saved = [];
 
     /**
+     * @var string[] event labels the last save persisted
+     */
+    private array $savedEvents = [];
+
+    /**
      * @var ManagerInterface
      */
     private ManagerInterface $messageManager;
@@ -37,7 +43,25 @@ class SaveTest extends TestCase
     protected function setUp(): void
     {
         $this->saved = [];
+        $this->savedEvents = [];
         $this->messageManager = $this->createStub(ManagerInterface::class);
+    }
+
+    /**
+     * The picker only ever offers labels the connector has really seen
+     * dispatched, and the controller enforces that rather than trusting the
+     * post. A label that was never dispatched would sit in the watched set
+     * forever matching nothing, which is the silent-failure this whole
+     * redesign exists to remove.
+     */
+    public function testAnEventLabelThatWasNeverDispatchedIsRejected(): void
+    {
+        $this->execute(
+            events: ['acme_erp', 'typo_erp'],
+            observedEvents: ['acme_erp' => 12]
+        );
+
+        self::assertSame(['acme_erp'], $this->savedEvents);
     }
 
     /**
@@ -138,13 +162,19 @@ class SaveTest extends TestCase
      * @param Redirect|null $redirect
      * @return void
      */
-    private function execute(array $modules = [], array $jobCodes = [], ?Redirect $redirect = null): void
-    {
+    private function execute(
+        array $modules = [],
+        array $jobCodes = [],
+        ?Redirect $redirect = null,
+        array $events = [],
+        array $observedEvents = []
+    ): void {
         $request = $this->createStub(RequestInterface::class);
         $request->method('getParam')->willReturnCallback(
             static fn (string $key, $default = null) => match ($key) {
                 'watched_modules' => $modules,
                 'watched_jobs' => $jobCodes,
+                'watched_events' => $events,
                 default => $default,
             }
         );
@@ -161,7 +191,12 @@ class SaveTest extends TestCase
         $discovery = $this->createStub(IntegrationDiscovery::class);
         $discovery->method('discover')->willReturn($this->offered());
 
-        $controller = new Save($context, $discovery, $this->watchedRepository());
+        $controller = new Save(
+            $context,
+            $discovery,
+            $this->watchedRepository(),
+            $this->eventRepository($observedEvents)
+        );
         $controller->execute();
     }
 
@@ -175,8 +210,9 @@ class SaveTest extends TestCase
     {
         $repository = $this->createStub(WatchedIntegrationRepository::class);
         $repository->method('save')->willReturnCallback(
-            function (array $moduleNames, array $jobCodes): void {
+            function (array $moduleNames, array $jobCodes, ?array $eventLabels = null): void {
                 $this->saved[] = [$moduleNames, $jobCodes];
+                $this->savedEvents = $eventLabels ?? [];
             }
         );
 
@@ -215,5 +251,19 @@ class SaveTest extends TestCase
                 consumerNames: [],
             ),
         ];
+    }
+
+    /**
+     * An event repository offering the labels the tests may select from.
+     *
+     * @param array<string,int> $observed
+     * @return IntegrationHealthEventRepository
+     */
+    private function eventRepository(array $observed = []): IntegrationHealthEventRepository
+    {
+        $repository = $this->createStub(IntegrationHealthEventRepository::class);
+        $repository->method('observedLabels')->willReturn($observed);
+
+        return $repository;
     }
 }
