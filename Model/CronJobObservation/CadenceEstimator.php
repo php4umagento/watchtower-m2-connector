@@ -12,44 +12,27 @@ namespace Watchtower\Connector\Model\CronJobObservation;
  * Turns a job's observed run history into the window integration_health
  * judges it against.
  *
- * Observed rather than declared, deliberately. crontab.xml states what a job
- * is *supposed* to do; this measures what it actually does on this host. On a
- * congested install a job declared "* / 5" may really run every 18 minutes,
- * and a threshold derived from the declared expression would alert
- * constantly. Measuring instead self-calibrates per store, and removes the
- * expected-max-interval field the merchant used to have to guess at.
+ * Measured rather than declared: crontab.xml says what a job should do, and on
+ * a congested host a five minute job may really run every eighteen.
  */
 class CadenceEstimator
 {
-    /**
-     * Gaps needed before any number here is trusted. Below this the job is
-     * reported as still learning and the signal stays INSUFFICIENT_DATA
-     * rather than alerting on an estimate drawn from one or two runs.
-     */
+    /** Below this the job reports as still learning, rather than alerting on a one-or-two-run estimate. */
     public const MIN_GAP_SAMPLES = 5;
 
-    /**
-     * A job is "regular" when its p90 gap is within this multiple of its
-     * median. Wider than that and a single threshold cannot separate normal
-     * spread from a real stall, so the picker warns and the merchant decides.
-     */
+    /** Wider spread than this and no single threshold separates normal from stalled, so the picker warns. */
     private const REGULARITY_RATIO = 2.0;
 
     /**
-     * The threshold takes whichever of these is larger, so a job with a tight
-     * distribution still gets headroom for one skipped run (the median term)
-     * and a job with a wide one is judged against its own tail (the p95 term)
-     * rather than against a median it routinely exceeds.
+     * Larger of the two wins: the median term gives a tight job headroom for
+     * one skipped run, the p95 term keeps a wide one off its own tail.
      */
     private const THRESHOLD_P95_MULTIPLIER = 1.5;
     private const THRESHOLD_MEDIAN_MULTIPLIER = 2.0;
 
     /**
-     * The platform evaluates hourly and only reports a transition after it
-     * holds for two consecutive evaluations, so end-to-end alert latency is
-     * one to two hours no matter what this returns. A threshold tighter than
-     * an hour therefore buys no detection speed at all and only converts
-     * ordinary cron jitter into false alarms.
+     * The platform evaluates hourly with a two-evaluation debounce, so
+     * anything tighter buys no detection speed and only adds false alarms.
      */
     private const MIN_THRESHOLD_SECONDS = 3600;
 
@@ -82,9 +65,7 @@ class CadenceEstimator
         $p90 = $observation->percentileGapSeconds(90);
         $p95 = $observation->percentileGapSeconds(95);
 
-        // Guarded for static analysis only: a non-empty sample set always
-        // yields all three, and MIN_GAP_SAMPLES above already proved it is
-        // non-empty.
+        // Static analysis only: MIN_GAP_SAMPLES above proved the set non-empty.
         if ($median === null || $p90 === null || $p95 === null) {
             return $this->learning($sampleCount, $observation->observedRunCount);
         }

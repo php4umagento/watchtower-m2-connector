@@ -16,34 +16,18 @@ use Watchtower\Connector\Model\Config;
  * Records every cron job's successful runs each tick, building the gap
  * history CadenceEstimator measures a job's rhythm from.
  *
- * Runs on every 5-minute tick rather than once per evaluation cycle, for the
- * same reason ReportingService::snapshotIntegrationHealthEvidence() does:
- * Magento prunes succeeded cron_schedule rows about an hour after they
- * finish (history_success_lifetime), so evidence sampled hourly is evidence
- * already partly deleted.
- *
- * Gated on isEnabled() but deliberately NOT on isConfigured(): a store that
- * has installed and enabled the module but not yet entered an API key should
- * still be accumulating cadence data, so the admin picker has real numbers to
- * show the moment they do configure it. A merchant who *disabled* the module
- * still expects it to stop writing, which is the rule ConventionEventObserver
- * follows too.
+ * Every tick rather than once per cycle, because Magento prunes succeeded
+ * cron_schedule rows within about an hour. Gated on isEnabled but not
+ * isConfigured, so cadence accumulates before an API key is ever entered.
  */
 class CronJobRunRecorder
 {
-    /**
-     * Generous relative to Magento's own ~60 minute history_success_lifetime,
-     * so an install whose host cron ticks irregularly still catches every
-     * success Magento has kept. Costs nothing extra when the table has been
-     * pruned normally, since there is simply nothing older to find.
-     */
+    /** Generous against Magento's ~60 minute history_success_lifetime, for hosts whose cron ticks irregularly. */
     private const LOOKBACK_MINUTES = 240;
 
     /**
-     * Gaps retained per job. Twenty is enough for a stable median and p95
-     * while keeping the row small, and it lets a job that genuinely changes
-     * schedule converge on its new rhythm within a day rather than being
-     * anchored to months of stale history.
+     * Enough for a stable median and p95, while letting a job that changes
+     * schedule converge on its new rhythm within a day.
      */
     public const MAX_GAP_SAMPLES = 20;
 
@@ -94,11 +78,9 @@ class CronJobRunRecorder
     /**
      * Folds this tick's newly-seen successes into a job's existing observation.
      *
-     * Returns null when every success fetched was already recorded, so an
-     * unchanged job costs no write. Every success is walked, not just the
-     * freshest: recording only the newest one per tick would measure a
-     * once-a-minute job as running every five minutes, which is the tick
-     * period rather than the job's own.
+     * Every success is walked, not just the freshest: taking only the newest
+     * would measure a once-a-minute job at the five minute tick period.
+     * Returns null when nothing was new, so an unchanged job costs no write.
      *
      * @param string $jobCode
      * @param JobRunObservation|null $existing
@@ -140,10 +122,8 @@ class CronJobRunRecorder
 
         return new JobRunObservation(
             jobCode: $jobCode,
-            // On a job's first sighting the window usually holds several past
-            // successes, so anchoring to the earliest of them rather than to
-            // now keeps the learning grace honest about how long this job has
-            // really been watched.
+            // The window usually holds past successes on a first sighting, so
+            // anchoring to the earliest keeps the learning grace honest.
             firstObservedAt: $existing?->firstObservedAt ?? $successes[0],
             lastSuccessAt: $lastSuccessAt,
             observedRunCount: $runCount,
@@ -154,9 +134,7 @@ class CronJobRunRecorder
     /**
      * Every successful run in the lookback window, grouped by job code, ascending within each.
      *
-     * One query for all jobs rather than one per job: the caller needs the
-     * whole picture each tick anyway, and cron_schedule is small because
-     * Magento prunes it.
+     * One query for all jobs: the caller needs the whole picture each tick.
      *
      * @param \DateTimeImmutable $now
      * @return array<string,\DateTimeImmutable[]>

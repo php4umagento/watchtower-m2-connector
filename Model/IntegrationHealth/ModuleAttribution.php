@@ -15,24 +15,18 @@ use Magento\Framework\Filesystem\Driver\File;
 use Magento\Framework\ObjectManager\ConfigInterface as ObjectManagerConfigInterface;
 
 /**
- * Answers "whose is this?" for a cron job or queue consumer, by mapping the
- * class that implements it back to the module that shipped it, and that
- * module back to a name the merchant recognizes.
+ * Answers "whose is this?" for a cron job or consumer, mapping the class that
+ * implements it back to the module that shipped it, and on to a name the
+ * merchant recognizes.
  *
- * This is the half of discovery that regularity cannot do. A job code is an
- * internal identifier that frequently does not contain the vendor's name at
- * all: Mailchimp ships as mailchimp/mc-magento2 but every one of its jobs is
- * called ebizmarts_*, so a merchant scanning the raw codes for "mailchimp"
- * finds nothing. The declaring module is the bridge between the two.
+ * Needed because a job code often lacks the vendor's name entirely: Mailchimp
+ * ships as mailchimp/mc-magento2 but its jobs are all ebizmarts_*.
  */
 class ModuleAttribution
 {
     /**
-     * Magento's own framework code is part of Magento but ships as a library
-     * rather than a module, so it appears in no registrar entry. Naming it
-     * here keeps jobs like messagequeue_clean_outdated_locks attributed to
-     * Magento instead of falling into the unattributed bucket beside a
-     * merchant's bespoke integrations.
+     * The framework ships as a library, not a module, so it appears in no
+     * registrar entry. Named here so its jobs attribute to Magento.
      */
     public const FRAMEWORK_MODULE = 'Magento_Framework';
 
@@ -94,12 +88,8 @@ class ModuleAttribution
     /**
      * Resolves a DI virtual type to the concrete class behind it.
      *
-     * Cron jobs name virtual types surprisingly often. Eight of stock
-     * Magento's own sales jobs point at names like
-     * SalesOrderIndexGridAsyncInsertCron, which carry no namespace at all and
-     * would otherwise be unattributable. getInstanceType() already follows a
-     * chain of virtual types extending virtual types, and returns the name
-     * unchanged when it is a real class.
+     * Eight of stock Magento's sales jobs name virtual types carrying no
+     * namespace at all, which would otherwise be unattributable.
      *
      * @param string $name
      * @return string
@@ -141,12 +131,8 @@ class ModuleAttribution
     /**
      * A merchant-recognizable label for whoever ships this module.
      *
-     * Taken from the Composer vendor segment where there is one, since that
-     * is the name a merchant bought the extension under, falling back to the
-     * module's own vendor segment. Deliberately a mechanical humanization
-     * rather than a lookup table of marketing names: "M2epro" is honest about
-     * what the install actually says, where guessing "M2E Pro" would be
-     * inventing information the connector does not have.
+     * Mechanical humanization of the Composer vendor, not a lookup table of
+     * marketing names: "M2epro" is honest, guessing "M2E Pro" invents facts.
      *
      * @param string $module
      * @return string

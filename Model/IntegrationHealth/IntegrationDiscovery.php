@@ -14,26 +14,17 @@ use Watchtower\Connector\Model\CronJobObservation\CadenceEstimator;
 use Watchtower\Connector\Model\CronJobObservation\JobRunObservationRepository;
 
 /**
- * Builds the list of integrations a merchant can choose to watch, by grouping
- * everything this install schedules and consumes under the module that ships
- * it and annotating each with its measured cadence.
+ * Builds the list of integrations a merchant can choose to watch, grouping
+ * what this install schedules and consumes under the module that ships it.
  *
- * Replaces asking the merchant for a source type plus a raw identifier. The
- * old picker offered 64 bare job codes with no way to tell an ERP sync from
- * catalog_product_outdated_price_values_cleanup, and a "Queue consumer"
- * option reading magento_operation, which is a log of bulk operations that
- * have already run rather than a catalogue of what exists, and is therefore
- * empty on most installs.
+ * Replaces a picker of 64 bare job codes in which the vendor's name often did
+ * not appear at all. See docs/integration-health-redesign.md.
  */
 class IntegrationDiscovery
 {
     /**
-     * Bucket for job codes seen running that no installed module declares.
-     *
-     * Jobs inserted straight into cron_schedule programmatically appear in no
-     * crontab.xml, so there is no instance class to attribute them through.
-     * They are still offered, because a bespoke integration is exactly the
-     * kind of thing that gets scheduled this way.
+     * Bucket for jobs seen running that no module declares. Still offered: a
+     * bespoke integration is exactly what gets scheduled that way.
      */
     public const UNATTRIBUTED_MODULE = '';
 
@@ -139,9 +130,8 @@ class IntegrationDiscovery
     /**
      * Groups declared message-queue consumers under the module that handles them.
      *
-     * Attribution goes through the handler class, not getConsumerInstance():
-     * that returns the generic framework ConsumerInterface for essentially
-     * every consumer and identifies nothing.
+     * Attribution goes through the handler class: getConsumerInstance()
+     * returns the generic framework interface and identifies nothing.
      *
      * @return array<string,string[]>
      */
