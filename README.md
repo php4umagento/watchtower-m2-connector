@@ -49,17 +49,22 @@ view. The rest are reported per store view.
 
 ## Requirements
 
-- PHP `~8.3.0 || ~8.4.0 || ~8.5.0`
+- Magento **2.4.7, 2.4.8 or 2.4.9** (what the `magento/framework` `103.0.*`
+  constraint below resolves to). Development and release verification run
+  against 2.4.9.
+- PHP `~8.3.0||~8.4.0||~8.5.0`
 - `magento/framework` `103.0.*`
+- `magento/framework-amqp` `100.4.*`
 - `magento/framework-bulk` `101.0.*`
-- `magento/module-store` `101.1.*`
+- `magento/framework-message-queue` `100.4.*`
+- `magento/module-asynchronous-operations` `100.4.*`
 - `magento/module-backend` `102.0.*`
 - `magento/module-config` `101.2.*`
-- `magento/module-asynchronous-operations` `100.4.*`
+- `magento/module-cron` `100.4.*`
+- `magento/module-store` `101.1.*`
 
-(See `composer.json` for the authoritative, currently-enforced version
-constraints — the list above mirrors it and may drift if you're reading an
-old copy of this file.)
+`composer.json` is the authoritative constraint; the list above is generated
+from it.
 
 ## Installation
 
