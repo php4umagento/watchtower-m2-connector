@@ -8,7 +8,6 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Test\Unit\Model\Seasonal;
 
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\Seasonal\RetailCalendar;
 
@@ -20,13 +19,22 @@ use Watchtower\Connector\Model\Seasonal\RetailCalendar;
  */
 class RetailCalendarTest extends TestCase
 {
-    #[DataProvider('blackFridayDates')]
-    public function testBlackFridayIsTheDayAfterTheFourthThursdayOfNovember(string $date): void
+    /**
+     * Cases are looped rather than fed through a data provider, so this suite
+     * runs on the PHPUnit shipping with 2.4.7 and 2.4.8 as well as 2.4.9.
+     * Attribute providers need PHPUnit 10+, annotation providers were removed
+     * in 12, so neither syntax spans all three.
+     */
+    public function testBlackFridayIsTheDayAfterTheFourthThursdayOfNovember(): void
     {
-        self::assertSame('black_friday', (new RetailCalendar())->periodKeyFor(new \DateTimeImmutable($date)));
+        foreach (self::blackFridayCases() as $case => [$date]) {
+            $key = (new RetailCalendar())->periodKeyFor(new \DateTimeImmutable($date));
+
+            self::assertSame('black_friday', $key, $case);
+        }
     }
 
-    public static function blackFridayDates(): array
+    private static function blackFridayCases(): array
     {
         return [
             'Nov 29, 2024 (real Black Friday)' => ['2024-11-29'],
@@ -35,13 +43,16 @@ class RetailCalendarTest extends TestCase
         ];
     }
 
-    #[DataProvider('easterSundayDates')]
-    public function testEasterSundayResolvesToTheEasterPeriodKey(string $date): void
+    public function testEasterSundayResolvesToTheEasterPeriodKey(): void
     {
-        self::assertSame('easter', (new RetailCalendar())->periodKeyFor(new \DateTimeImmutable($date)));
+        foreach (self::easterSundayCases() as $case => [$date]) {
+            $key = (new RetailCalendar())->periodKeyFor(new \DateTimeImmutable($date));
+
+            self::assertSame('easter', $key, $case);
+        }
     }
 
-    public static function easterSundayDates(): array
+    private static function easterSundayCases(): array
     {
         return [
             'Mar 31, 2024 (real Easter Sunday)' => ['2024-03-31'],

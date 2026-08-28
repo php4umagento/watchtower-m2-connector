@@ -97,7 +97,7 @@ class InstallEventCounterRepositoryTest extends TestCase
         $connection = $this->createMock(AdapterInterface::class);
         $connection->expects(self::once())
             ->method('delete')
-            ->with('watchtower_install_event_counter', self::isArray())
+            ->with('watchtower_install_event_counter', self::callback('is_array'))
             ->willReturn(6);
 
         $resourceConnection = $this->createStub(ResourceConnection::class);

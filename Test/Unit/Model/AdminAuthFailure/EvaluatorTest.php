@@ -8,7 +8,6 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Test\Unit\Model\AdminAuthFailure;
 
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\AdminAuthFailure\AdminAuthFailureObserver;
 use Watchtower\Connector\Model\AdminAuthFailure\Evaluator;
@@ -21,18 +20,25 @@ use Watchtower\Connector\Model\HealthState\HealthStateRepository;
 
 class EvaluatorTest extends TestCase
 {
-    #[DataProvider('countProvider')]
-    public function testClassifiesTheFailureCountAgainstTheFixedThresholds(int $count, SignalStatus $expected): void
+    /**
+     * Cases are looped rather than fed through a data provider, so this suite
+     * runs on the PHPUnit shipping with 2.4.7 and 2.4.8 as well as 2.4.9.
+     * Attribute providers need PHPUnit 10+, annotation providers were removed
+     * in 12, so neither syntax spans all three.
+     */
+    public function testClassifiesTheFailureCountAgainstTheFixedThresholds(): void
     {
-        $report = $this->evaluateWith($count, confirmed: $expected, pending: $expected);
+        foreach (self::countCases() as $case => [$count, $expected]) {
+            $report = $this->evaluateWith($count, confirmed: $expected, pending: $expected);
 
-        self::assertSame($expected, $report->status);
+            self::assertSame($expected, $report->status, $case);
+        }
     }
 
     /**
      * @return array<string, array{0: int, 1: SignalStatus}>
      */
-    public static function countProvider(): array
+    private static function countCases(): array
     {
         return [
             'zero failures' => [0, SignalStatus::Normal],

@@ -961,9 +961,9 @@ class ReportingServiceTest extends TestCase
         $rollupRepository = $this->createMock(RollupRepository::class);
         $rollupRepository->expects(self::exactly(3))->method('recordHourlyCount')->with(
             1,
-            self::isString(),
+            self::callback('is_string'),
             $expectedWindowStart,
-            self::isInt()
+            self::callback('is_int')
         );
 
         $basketQuoteStoreReport = $this->storeViewReport(HistorySeeder::CATEGORY_BASKET_QUOTE, 'default');

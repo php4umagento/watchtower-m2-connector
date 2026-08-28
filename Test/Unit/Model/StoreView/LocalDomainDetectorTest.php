@@ -8,7 +8,6 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Test\Unit\Model\StoreView;
 
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\StoreView\LocalDomainDetector;
 
@@ -17,7 +16,7 @@ class LocalDomainDetectorTest extends TestCase
     /**
      * @return array<string, array{0: string, 1: bool}>
      */
-    public static function urlProvider(): array
+    private static function urlCases(): array
     {
         return [
             'bare localhost' => ['http://localhost/', true],
@@ -41,10 +40,17 @@ class LocalDomainDetectorTest extends TestCase
         ];
     }
 
-    #[DataProvider('urlProvider')]
-    public function testLooksLocal(string $url, bool $expected): void
+    /**
+     * Cases are looped rather than fed through a data provider, so this suite
+     * runs on the PHPUnit shipping with 2.4.7 and 2.4.8 as well as 2.4.9.
+     * Attribute providers need PHPUnit 10+, annotation providers were removed
+     * in 12, so neither syntax spans all three.
+     */
+    public function testLooksLocal(): void
     {
-        self::assertSame($expected, (new LocalDomainDetector())->looksLocal($url));
+        foreach (self::urlCases() as $case => [$url, $expected]) {
+            self::assertSame($expected, (new LocalDomainDetector())->looksLocal($url), $case);
+        }
     }
 
     public function testAMalformedUrlIsNotFlaggedAsLocal(): void

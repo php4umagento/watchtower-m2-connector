@@ -8,7 +8,6 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Test\Unit\Model\CheckoutFailure;
 
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
@@ -86,21 +85,25 @@ class EvaluatorTest extends TestCase
         self::assertSame(SignalStatus::InsufficientData, $report->status);
     }
 
-    #[DataProvider('ratioProvider')]
-    public function testClassifiesTheFailureRatioOnceThereAreEnoughAttempts(
-        int $failures,
-        int $orders,
-        SignalStatus $expected
-    ): void {
-        $report = $this->evaluateWith($failures, $orders, confirmed: $expected, pending: $expected);
+    /**
+     * Cases are looped rather than fed through a data provider, so this suite
+     * runs on the PHPUnit shipping with 2.4.7 and 2.4.8 as well as 2.4.9.
+     * Attribute providers need PHPUnit 10+, annotation providers were removed
+     * in 12, so neither syntax spans all three.
+     */
+    public function testClassifiesTheFailureRatioOnceThereAreEnoughAttempts(): void
+    {
+        foreach (self::ratioCases() as $case => [$failures, $orders, $expected]) {
+            $report = $this->evaluateWith($failures, $orders, confirmed: $expected, pending: $expected);
 
-        self::assertSame($expected, $report->status);
+            self::assertSame($expected, $report->status, $case);
+        }
     }
 
     /**
      * @return array<string, array{0: int, 1: int, 2: SignalStatus}>
      */
-    public static function ratioProvider(): array
+    private static function ratioCases(): array
     {
         return [
             // Background decline noise must stay quiet: the thresholds are

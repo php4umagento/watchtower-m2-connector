@@ -8,7 +8,6 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Test\Unit\ViewModel\IntegrationHealth;
 
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\CronJobObservation\Cadence;
 use Watchtower\Connector\ViewModel\IntegrationHealth\CadenceDescriber;
@@ -26,21 +25,24 @@ class CadenceDescriberTest extends TestCase
     }
 
     /**
-     * @param int $periodSeconds
-     * @param string $expected
+     * Cases are looped rather than fed through a data provider, so this suite
+     * runs on the PHPUnit shipping with 2.4.7 and 2.4.8 as well as 2.4.9.
+     * Attribute providers need PHPUnit 10+, annotation providers were removed
+     * in 12, so neither syntax spans all three.
      */
-    #[DataProvider('periodProvider')]
-    public function testHumanizesTheMeasuredPeriod(int $periodSeconds, string $expected): void
+    public function testHumanizesTheMeasuredPeriod(): void
     {
-        $described = (string) $this->describer->describe($this->confident($periodSeconds, runs: 240));
+        foreach (self::periodCases() as $case => [$periodSeconds, $expected]) {
+            $described = (string) $this->describer->describe($this->confident($periodSeconds, runs: 240));
 
-        self::assertSame($expected . ' (observed, 240 runs)', $described);
+            self::assertSame($expected . ' (observed, 240 runs)', $described, $case);
+        }
     }
 
     /**
      * @return array<string, array{int, string}>
      */
-    public static function periodProvider(): array
+    private static function periodCases(): array
     {
         return [
             'sub-minute' => [45, 'every 45 sec'],
@@ -59,7 +61,7 @@ class CadenceDescriberTest extends TestCase
     /**
      * A period of 90 minutes is a third away from an hour, so reporting it as
      * "every 2 hours" would describe a job the merchant would not recognize.
-     * Covered by periodProvider; asserted separately because it is the reason
+     * Covered by periodCases; asserted separately because it is the reason
      * the unit choice is tolerance-based rather than a fixed cutoff.
      */
     public function testPrefersTheSmallerUnitWhenRoundingWouldDistortThePeriod(): void

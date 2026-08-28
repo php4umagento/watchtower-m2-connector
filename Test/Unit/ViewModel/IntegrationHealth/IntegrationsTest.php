@@ -10,7 +10,6 @@ namespace Watchtower\Connector\Test\Unit\ViewModel\IntegrationHealth;
 
 use Magento\Backend\Model\UrlInterface;
 use Magento\Framework\Data\Form\FormKey;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\CronJobObservation\Cadence;
 use Watchtower\Connector\Model\IntegrationHealth\DiscoveredIntegration;
@@ -114,24 +113,32 @@ class IntegrationsTest extends TestCase
      * @param int $jobCount
      * @param string $expected
      */
-    #[DataProvider('contentsProvider')]
-    public function testSummarizesWhatAnIntegrationContains(array $consumers, int $jobCount, string $expected): void
+    /**
+     * Cases are looped rather than fed through a data provider, so this suite
+     * runs on the PHPUnit shipping with 2.4.7 and 2.4.8 as well as 2.4.9.
+     * Attribute providers need PHPUnit 10+, annotation providers were removed
+     * in 12, so neither syntax spans all three.
+     */
+    public function testSummarizesWhatAnIntegrationContains(): void
     {
-        $jobs = [];
+        foreach (self::contentsCases() as $case => [$consumers, $jobCount, $expected]) {
+            $jobs = [];
 
-        for ($i = 0; $i < $jobCount; $i++) {
-            $jobs[] = new DiscoveredJob('job_' . $i, '*/5 * * * *', $this->confidentCadence());
+            for ($i = 0; $i < $jobCount; $i++) {
+                $jobs[] = new DiscoveredJob('job_' . $i, '*/5 * * * *', $this->confidentCadence());
+            }
+
+            $integration = $this->integration('Vendor_Module', jobs: $jobs, consumerNames: $consumers);
+            $summary = $this->viewModel([$integration])->getContentsSummary($integration);
+
+            self::assertSame($expected, $summary, $case);
         }
-
-        $integration = $this->integration('Vendor_Module', jobs: $jobs, consumerNames: $consumers);
-
-        self::assertSame($expected, $this->viewModel([$integration])->getContentsSummary($integration));
     }
 
     /**
      * @return array<string, array{string[], int, string}>
      */
-    public static function contentsProvider(): array
+    private static function contentsCases(): array
     {
         return [
             'one job' => [[], 1, '1 scheduled job'],
