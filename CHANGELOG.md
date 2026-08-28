@@ -5,6 +5,24 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.28.0] - 2026-08-28
+
+Reworks the **Watchtower > Integrations** page after reviewing it on a store
+with fourteen integrations rather than one. Integrations now lead with a
+distinct name, so three Amasty extensions no longer all read "Amasty"; the
+per-integration job list is an inline link instead of a heading repeated down
+the page; every integration shows how often it was measured running, not only
+the awkward ones; and there is a filter box plus a line naming anything you
+watch that is currently failing.
+
+Also stops offering cron jobs that have no class behind them. A crontab.xml
+config_path naming a different job code than its own job name makes Magento
+mint a schedule with nothing to execute, which can only ever look broken. On
+one store that was catalog_product_alert, erroring every time it fired.
+
+Upgrade: run `bin/magento setup:upgrade` and `bin/magento setup:di:compile`.
+No configuration changes, and anything you already watch stays watched.
+
 ## [1.27.0] - 2026-08-27
 
 Internal cleanup with no change to what the connector monitors or reports:
