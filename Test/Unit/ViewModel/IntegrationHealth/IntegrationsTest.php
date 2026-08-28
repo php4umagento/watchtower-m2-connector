@@ -85,7 +85,11 @@ class IntegrationsTest extends TestCase
 
         self::assertTrue($viewModel->isSelectableAsWhole($mailchimp));
         self::assertFalse($viewModel->isSelectableAsWhole($unattributed));
-        self::assertTrue($viewModel->isDetailOpen($unattributed));
+
+        // It used to force its job list open, which on a real store made it the
+        // single expanded entry in a list of collapsed ones, halfway down the
+        // page. It now collapses like everything else and sorts last.
+        self::assertFalse($viewModel->isDetailOpen($unattributed));
     }
 
     public function testExpandsTheJobListWhenAnIndividualJobIsWatched(): void
@@ -287,10 +291,12 @@ class IntegrationsTest extends TestCase
         string $vendorLabel = 'Vendor',
         bool $isThirdParty = true,
         array $jobs = [],
-        array $consumerNames = []
+        array $consumerNames = [],
+        ?string $displayName = null
     ): DiscoveredIntegration {
         return new DiscoveredIntegration(
             moduleName: $moduleName,
+            displayName: $displayName ?? $vendorLabel,
             vendorLabel: $vendorLabel,
             packageName: null,
             isThirdParty: $isThirdParty,

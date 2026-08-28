@@ -146,6 +146,44 @@ class ModuleAttribution
     }
 
     /**
+     * The name to show a merchant for this module.
+     *
+     * Built from the module name rather than the Composer description. The
+     * description looked like the obvious source and is not: vendors put
+     * whatever they like in it. Amasty writes product names, M2E writes a
+     * marketing paragraph, and PayPal_Braintree writes "Fork from the Magento
+     * Braintree 2.2.0 module by Gene", which is worse than no name at all.
+     *
+     * The module name is always present, always distinct, and uses the
+     * vendor's own capitalisation, so three Amasty modules become "Amasty
+     * Acart", "Amasty Base" and "Amasty CronScheduleList" rather than three
+     * rows all reading "Amasty".
+     *
+     * @param string $module
+     * @return string
+     */
+    public function displayNameFor(string $module): string
+    {
+        // Only the underscore is split. Splitting CamelCase too was tried and
+        // reverted: it turns PayPal_Braintree into "Pay Pal Braintree" and
+        // MailChimp into "Mail Chimp". An unspaced compound like
+        // "CronScheduleList" is merely less pretty, whereas a mangled brand
+        // name is wrong, and Magento users read module names constantly.
+        $spaced = str_replace('_', ' ', $module);
+
+        $words = [];
+
+        foreach (explode(' ', $spaced) as $word) {
+            // Salesfire_Salesfire would otherwise read "Salesfire Salesfire".
+            if ($word !== '' && strcasecmp($word, (string) end($words)) !== 0) {
+                $words[] = $word;
+            }
+        }
+
+        return implode(' ', $words);
+    }
+
+    /**
      * Whether this module is part of Magento itself rather than something the merchant added.
      *
      * Used to rank discovered integrations, not to hide core modules: a
@@ -179,29 +217,43 @@ class ModuleAttribution
      */
     private function readPackageName(string $module): string|false
     {
+        $name = $this->readComposerField($module, 'name');
+
+        return $name ?? false;
+    }
+
+    /**
+     * Reads one field from a module's composer.json, or null when unavailable.
+     *
+     * @param string $module
+     * @param string $field
+     * @return string|null
+     */
+    private function readComposerField(string $module, string $field): ?string
+    {
         $path = $this->modulePaths()[$module] ?? null;
 
         if ($path === null) {
-            return false;
+            return null;
         }
 
         try {
             $composerPath = $path . '/composer.json';
 
             if (!$this->fileDriver->isExists($composerPath)) {
-                return false;
+                return null;
             }
 
             $decoded = json_decode($this->fileDriver->fileGetContents($composerPath), true);
         } catch (FileSystemException) {
             // An unreadable composer.json is a naming inconvenience, never a
             // reason to fail discovery: the module name still identifies it.
-            return false;
+            return null;
         }
 
-        return is_array($decoded) && isset($decoded['name']) && is_string($decoded['name'])
-            ? $decoded['name']
-            : false;
+        return is_array($decoded) && isset($decoded[$field]) && is_string($decoded[$field])
+            ? $decoded[$field]
+            : null;
     }
 
     /**

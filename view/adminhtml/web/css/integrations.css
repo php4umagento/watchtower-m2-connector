@@ -1,0 +1,77 @@
+/**
+ * Copyright © 2026 Watchtower. All rights reserved.
+ * Licensed under the Business Source License 1.1 (BUSL-1.1). See LICENSE.
+ *
+ * Enough styling to establish a hierarchy on this page and no more. Reviewing
+ * it on a store with fourteen integrations showed the per-integration "choose
+ * individual jobs" disclosure rendered at the same weight as the page's own
+ * section headings, so a list of integrations read as seventeen equal
+ * sections. These rules demote it and lift the integration name above the
+ * package slug beside it.
+ */
+
+.watchtower-integration {
+    border-bottom: 1px solid #e3e3e3;
+    padding: 1.2rem 0;
+}
+
+.watchtower-integration:last-child {
+    border-bottom: 0;
+}
+
+.watchtower-integration .admin__field-label strong {
+    font-size: 1.5rem;
+}
+
+/* The vendor and package slug identify the row without competing with it. */
+.watchtower-integration-package {
+    color: #777;
+    font-size: 1.2rem;
+    margin-left: .6rem;
+}
+
+.watchtower-integration-meta {
+    color: #303030;
+    font-size: 1.2rem;
+    margin: .2rem 0 0 2.6rem;
+}
+
+.watchtower-integration-note {
+    color: #8a6d3b;
+    font-size: 1.2rem;
+    margin: .2rem 0 0 2.6rem;
+}
+
+/* A link, not a heading. This is the fix for the fourteen repeated headings. */
+.watchtower-integration-jobs {
+    margin: .4rem 0 0 2.6rem;
+}
+
+.watchtower-integration-jobs-toggle {
+    color: #007bdb;
+    cursor: pointer;
+    display: inline-block;
+    font-size: 1.2rem;
+    list-style: revert;
+}
+
+.watchtower-integration-jobs-toggle:hover {
+    text-decoration: underline;
+}
+
+.watchtower-integration-jobs .details-content {
+    margin-top: .6rem;
+}
+
+.watchtower-integration-tally {
+    font-size: 1.4rem;
+}
+
+/* Keeps Save reachable on a page that is several thousand pixels tall. */
+.watchtower-integration-actions {
+    background: #fff;
+    border-top: 1px solid #e3e3e3;
+    bottom: 0;
+    padding: 1.2rem 0;
+    position: sticky;
+}

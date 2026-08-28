@@ -68,9 +68,14 @@ class IntegrationDiscovery
 
         usort($integrations, function (DiscoveredIntegration $a, DiscoveredIntegration $b): int {
             // Third-party first: a merchant hunting their ERP sync should not
-            // have to scroll past 60 core housekeeping jobs to reach it.
-            return [$b->isThirdParty, $a->vendorLabel, $a->moduleName]
-                <=> [$a->isThirdParty, $b->vendorLabel, $b->moduleName];
+            // have to scroll past 60 core housekeeping jobs to reach it. The
+            // unattributed bucket sorts last within its group rather than
+            // alphabetically, where it landed mid-list between real vendors.
+            $aLast = $a->moduleName === self::UNATTRIBUTED_MODULE;
+            $bLast = $b->moduleName === self::UNATTRIBUTED_MODULE;
+
+            return [$b->isThirdParty, $aLast, $a->displayName, $a->moduleName]
+                <=> [$a->isThirdParty, $bLast, $b->displayName, $b->moduleName];
         });
 
         return $integrations;
@@ -177,8 +182,11 @@ class IntegrationDiscovery
 
         return new DiscoveredIntegration(
             moduleName: $module,
-            vendorLabel: $isUnattributed
+            displayName: $isUnattributed
                 ? (string) __('Other scheduled jobs')
+                : $this->moduleAttribution->displayNameFor($module),
+            vendorLabel: $isUnattributed
+                ? ''
                 : $this->moduleAttribution->vendorLabelFor($module),
             packageName: $isUnattributed ? null : $this->moduleAttribution->packageFor($module),
             // An unattributed job is by definition not part of stock Magento,

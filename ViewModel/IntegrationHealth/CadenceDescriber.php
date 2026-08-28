@@ -49,7 +49,7 @@ class CadenceDescriber
             return __('learning cadence');
         }
 
-        $period = $this->period($cadence->periodSeconds);
+        $period = $this->humanizePeriod($cadence->periodSeconds);
 
         return $cadence->observedRunCount === 1
             ? __('%1 (observed, 1 run)', $period)
@@ -90,7 +90,7 @@ class CadenceDescriber
      * @param int $seconds
      * @return Phrase
      */
-    private function period(int $seconds): Phrase
+    public function humanizePeriod(int $seconds): Phrase
     {
         if ($seconds >= self::SECONDS_PER_DAY && $this->roundsCleanly($seconds, self::SECONDS_PER_DAY)) {
             $days = $this->inUnits($seconds, self::SECONDS_PER_DAY);

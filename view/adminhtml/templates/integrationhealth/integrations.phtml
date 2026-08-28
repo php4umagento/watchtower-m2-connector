@@ -37,6 +37,16 @@ $rowIndex = 0;
             . 'Anything left unticked is not watched.'
         )) ?></p>
 
+        <?php
+        [$watchedCount, $totalCount] = $viewModel->getWatchedTally();
+        $tally = __('Watching %1 of %2.', $watchedCount, $totalCount);
+        ?>
+        <?php if ($totalCount > 0): ?>
+            <p class="watchtower-integration-tally">
+                <strong><?= $escaper->escapeHtml($tally) ?></strong>
+            </p>
+        <?php endif; ?>
+
         <?php if ($sections === []): ?>
             <?php $emptyMessage = __('Nothing to watch yet. No scheduled jobs or queue consumers were found.'); ?>
             <p><?= $escaper->escapeHtml($emptyMessage) ?></p>
@@ -62,26 +72,24 @@ $rowIndex = 0;
                                         <?= $viewModel->isWatched($integration) ? ' checked' : '' ?>>
                                     <label class="admin__field-label"
                                            for="watchtower_module_<?= (int) $rowIndex ?>">
-                                        <strong><?= $escaper->escapeHtml($integration->vendorLabel) ?></strong>
-                                        <?php if ($integration->packageName !== null): ?>
-                                            <span class="watchtower-integration-package">
-                                                <?= $escaper->escapeHtml($integration->packageName) ?>
-                                            </span>
-                                        <?php else: ?>
-                                            <span class="watchtower-integration-package">
-                                                <?= $escaper->escapeHtml($integration->moduleName) ?>
-                                            </span>
-                                        <?php endif; ?>
+                                        <strong><?= $escaper->escapeHtml($integration->displayName) ?></strong>
+                                        <span class="watchtower-integration-package">
+                                            <?= $escaper->escapeHtml($integration->vendorLabel) ?>
+                                            <?= $escaper->escapeHtml(
+                                                $integration->packageName ?? $integration->moduleName
+                                            ) ?>
+                                        </span>
                                     </label>
                                 </div>
                             <?php else: ?>
                                 <div class="admin__field">
-                                    <strong><?= $escaper->escapeHtml($integration->vendorLabel) ?></strong>
+                                    <strong><?= $escaper->escapeHtml($integration->displayName) ?></strong>
                                 </div>
                             <?php endif; ?>
 
                             <div class="watchtower-integration-meta">
-                                <?= $escaper->escapeHtml($viewModel->getContentsSummary($integration)) ?>
+                                <?= $escaper->escapeHtml($viewModel->getContentsSummary($integration)) ?>,
+                                <?= $escaper->escapeHtml($viewModel->getCadenceSummary($integration)) ?>
                             </div>
 
                             <?php foreach ($viewModel->getNotes($integration) as $note): ?>
@@ -100,10 +108,16 @@ $rowIndex = 0;
                             <?php endif; ?>
 
                             <?php if ($integration->jobs !== []): ?>
-                                <details class="details admin__collapsible-block-wrapper"
+                                <details class="watchtower-integration-jobs"
                                     <?= $viewModel->isDetailOpen($integration) ? ' open' : '' ?>>
-                                    <summary class="details-summary admin__collapsible-title">
-                                        <span><?= $escaper->escapeHtml(__('Choose individual jobs')) ?></span>
+                                    <?php
+                                    $jobCount = count($integration->jobs);
+                                    $jobsToggle = $jobCount === 1
+                                        ? __('Choose the individual job')
+                                        : __('Choose from %1 individual jobs', $jobCount);
+                                    ?>
+                                    <summary class="watchtower-integration-jobs-toggle">
+                                        <span><?= $escaper->escapeHtml($jobsToggle) ?></span>
                                     </summary>
                                     <div class="details-content">
                                         <table class="data-grid">
@@ -186,7 +200,7 @@ $rowIndex = 0;
             </div>
         </details>
 
-        <div class="admin__field">
+        <div class="admin__field watchtower-integration-actions">
             <button type="submit" class="action-primary" data-role="save">
                 <span><?= $escaper->escapeHtml(__('Save')) ?></span>
             </button>

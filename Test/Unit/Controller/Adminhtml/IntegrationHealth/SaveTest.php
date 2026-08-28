@@ -236,6 +236,7 @@ class SaveTest extends TestCase
         return [
             new DiscoveredIntegration(
                 moduleName: 'Ebizmarts_MailChimp',
+                displayName: 'Connect MailChimp with Magento',
                 vendorLabel: 'Mailchimp',
                 packageName: 'mailchimp/mc-magento2',
                 isThirdParty: true,
@@ -244,7 +245,8 @@ class SaveTest extends TestCase
             ),
             new DiscoveredIntegration(
                 moduleName: IntegrationDiscovery::UNATTRIBUTED_MODULE,
-                vendorLabel: 'Other scheduled jobs',
+                displayName: 'Other scheduled jobs',
+                vendorLabel: '',
                 packageName: null,
                 isThirdParty: true,
                 jobs: [new DiscoveredJob('avalon_conditions', null, $cadence)],

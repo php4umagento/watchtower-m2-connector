@@ -21,7 +21,8 @@ class DiscoveredIntegration
 {
     /**
      * @param string $moduleName Vendor_Module, or empty for the unattributed bucket
-     * @param string $vendorLabel merchant-recognizable name for whoever ships it
+     * @param string $displayName what the merchant sees, from the Composer description where there is one
+     * @param string $vendorLabel who ships it, shown as secondary detail
      * @param string|null $packageName Composer package, null for a module without one
      * @param bool $isThirdParty false for modules that are part of Magento itself
      * @param DiscoveredJob[] $jobs
@@ -29,6 +30,7 @@ class DiscoveredIntegration
      */
     public function __construct(
         public readonly string $moduleName,
+        public readonly string $displayName,
         public readonly string $vendorLabel,
         public readonly ?string $packageName,
         public readonly bool $isThirdParty,

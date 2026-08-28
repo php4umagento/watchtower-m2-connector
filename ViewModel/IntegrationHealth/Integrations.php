@@ -144,6 +144,69 @@ class Integrations implements ArgumentInterface
     }
 
     /**
+     * How often this integration's jobs were measured to run.
+     *
+     * Rendered for every integration, not only the awkward ones. Previously
+     * only "learning" and "runs irregularly" were shown, so a healthy entry
+     * and one nothing is known about looked identical.
+     *
+     * @param DiscoveredIntegration $integration
+     * @return Phrase
+     */
+    public function getCadenceSummary(DiscoveredIntegration $integration): Phrase
+    {
+        $confident = [];
+
+        foreach ($integration->jobs as $job) {
+            if ($job->cadence->isConfident && $job->cadence->periodSeconds !== null) {
+                $confident[] = $job->cadence->periodSeconds;
+            }
+        }
+
+        if ($confident === []) {
+            return __('still measuring how often this runs');
+        }
+
+        sort($confident);
+        $fastest = $this->cadenceDescriber->humanizePeriod($confident[0]);
+
+        return count($confident) === count($integration->jobs)
+            ? __('runs %1', $fastest)
+            : __('runs %1, other jobs still being measured', $fastest);
+    }
+
+    /**
+     * How many integrations are currently watched, out of how many exist.
+     *
+     * @return array{0: int, 1: int}
+     */
+    public function getWatchedTally(): array
+    {
+        $watched = 0;
+        $total = 0;
+
+        foreach ($this->integrations() as $integration) {
+            $total++;
+
+            if ($this->isWatched($integration)) {
+                $watched++;
+
+                continue;
+            }
+
+            foreach ($integration->jobs as $job) {
+                if ($this->isJobWatched($job)) {
+                    $watched++;
+
+                    break;
+                }
+            }
+        }
+
+        return [$watched, $total];
+    }
+
+    /**
      * The merchant's own extensions, plus anything scheduled that no installed module declares.
      *
      * Kept in discovery's order rather than re-sorted here: it already ranks
@@ -213,19 +276,16 @@ class Integrations implements ArgumentInterface
     /**
      * Whether the individual-job list should start expanded.
      *
-     * Open when the merchant has picked individual jobs here, so a choice they
-     * made is never hidden behind a click, and open for the unattributed
-     * bucket, whose jobs are the only thing selectable in it.
+     * Open only when the merchant has picked individual jobs here, so a choice
+     * they made is never hidden behind a click. The unattributed bucket used
+     * to open too, which made it the one expanded entry in a list of collapsed
+     * ones.
      *
      * @param DiscoveredIntegration $integration
      * @return bool
      */
     public function isDetailOpen(DiscoveredIntegration $integration): bool
     {
-        if (!$this->isSelectableAsWhole($integration)) {
-            return true;
-        }
-
         foreach ($integration->jobs as $job) {
             if ($this->isJobWatched($job)) {
                 return true;
