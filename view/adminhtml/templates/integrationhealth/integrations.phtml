@@ -44,7 +44,33 @@ $rowIndex = 0;
         <?php if ($totalCount > 0): ?>
             <p class="watchtower-integration-tally">
                 <strong><?= $escaper->escapeHtml($tally) ?></strong>
+                <?php $failing = $viewModel->getFailingIntegrationNames(); ?>
+                <?php if ($failing !== []): ?>
+                    <?php $failingText = __(
+                        '%1 currently failing: %2.',
+                        count($failing),
+                        implode(', ', $failing)
+                    ); ?>
+                    <span class="watchtower-integration-failing">
+                        <?= $escaper->escapeHtml($failingText) ?>
+                    </span>
+                    <a href="<?= $escaper->escapeUrl($viewModel->getDiagnosticsUrl()) ?>">
+                        <?= $escaper->escapeHtml(__('View diagnostics')) ?>
+                    </a>
+                <?php endif; ?>
             </p>
+
+            <?php $filterPlaceholder = __('Filter by name, vendor, package or job code'); ?>
+            <div class="admin__field watchtower-integration-filter">
+                <input type="search"
+                       class="admin__control-text"
+                       data-role="integration-filter"
+                       autocomplete="off"
+                       placeholder="<?= $escaper->escapeHtmlAttr($filterPlaceholder) ?>">
+                <span class="watchtower-integration-filter-empty" data-role="filter-empty" hidden>
+                    <?= $escaper->escapeHtml(__('Nothing matches that.')) ?>
+                </span>
+            </div>
         <?php endif; ?>
 
         <?php if ($sections === []): ?>
@@ -60,7 +86,10 @@ $rowIndex = 0;
                 <div class="details-content admin__fieldset">
                     <?php foreach ($section['integrations'] as $integration): ?>
                         <?php $rowIndex++; ?>
-                        <div class="admin__fieldset-wrapper watchtower-integration" data-role="integration">
+                        <?php $searchText = $viewModel->getSearchText($integration); ?>
+                        <div class="admin__fieldset-wrapper watchtower-integration"
+                             data-role="integration"
+                             data-search="<?= $escaper->escapeHtmlAttr($searchText) ?>">
                             <?php if ($viewModel->isSelectableAsWhole($integration)): ?>
                                 <div class="admin__field admin__field-option">
                                     <input type="checkbox"

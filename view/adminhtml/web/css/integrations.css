@@ -75,3 +75,21 @@
     padding: 1.2rem 0;
     position: sticky;
 }
+
+.watchtower-integration-failing {
+    color: #e22626;
+    margin-left: .6rem;
+}
+
+.watchtower-integration-filter {
+    margin: 1.2rem 0;
+}
+
+.watchtower-integration-filter .admin__control-text {
+    max-width: 42rem;
+}
+
+.watchtower-integration-filter-empty {
+    color: #777;
+    margin-left: .8rem;
+}

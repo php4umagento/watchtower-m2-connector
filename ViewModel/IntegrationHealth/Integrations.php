@@ -19,6 +19,9 @@ use Watchtower\Connector\Model\CronJobObservation\CronJobRunRecorder;
 use Watchtower\Connector\Model\CronJobObservation\JobRunObservation;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationDiscovery;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthEventRepository;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
+use Watchtower\Connector\Model\IntegrationHealth\WatchedSetEvaluator;
+use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
 
 /**
@@ -63,6 +66,9 @@ class Integrations implements ArgumentInterface
      * @param FormKey $formKey
      * @param IntegrationHealthEventRepository $eventRepository
      * @param CadenceEstimator $cadenceEstimator
+     * @param WatchedJobResolver $watchedJobResolver
+     * @param WatchedSetEvaluator $watchedSetEvaluator
+     * @param LiveStoreViewResolver $liveStoreViewResolver
      */
     public function __construct(
         private readonly IntegrationDiscovery $discovery,
@@ -71,7 +77,10 @@ class Integrations implements ArgumentInterface
         private readonly UrlInterface $url,
         private readonly FormKey $formKey,
         private readonly IntegrationHealthEventRepository $eventRepository,
-        private readonly CadenceEstimator $cadenceEstimator
+        private readonly CadenceEstimator $cadenceEstimator,
+        private readonly WatchedJobResolver $watchedJobResolver,
+        private readonly WatchedSetEvaluator $watchedSetEvaluator,
+        private readonly LiveStoreViewResolver $liveStoreViewResolver
     ) {
     }
 
@@ -141,6 +150,100 @@ class Integrations implements ArgumentInterface
     public function getEventDispatchCount(string $label): int
     {
         return $this->observedEvents[$label] ?? 0;
+    }
+
+    /**
+     * The watched integrations currently judged unhealthy, by display name.
+     *
+     * Named here rather than only in Diagnostics because this is the page a
+     * merchant opens to decide what to watch, and "is any of it broken right
+     * now" is the obvious next question. The detail stays in Diagnostics.
+     *
+     * @return string[]
+     */
+    public function getFailingIntegrationNames(): array
+    {
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $failingJobs = array_flip($this->watchedSetEvaluator->unhealthyJobCodes(
+            $this->watchedJobResolver->resolve(),
+            $now
+        ));
+
+        $names = [];
+
+        foreach ($this->integrations() as $integration) {
+            foreach ($integration->jobs as $job) {
+                if (isset($failingJobs[$job->jobCode]) && $this->isEffectivelyWatched($integration, $job)) {
+                    $names[$integration->displayName] = true;
+
+                    break;
+                }
+            }
+        }
+
+        // Convention events are judged per store view, so the same label can be
+        // stalled in one and fine in another. Any store view failing is worth
+        // surfacing; which one is Diagnostics' job to say.
+        $labels = $this->watchedJobResolver->resolveEventLabels();
+
+        foreach ($this->liveStoreViewResolver->all() as $store) {
+            foreach ($this->watchedSetEvaluator->unhealthyEventLabels($labels, (int) $store->getId(), $now) as $label) {
+                $names[$label] = true;
+            }
+        }
+
+        return array_keys($names);
+    }
+
+    /**
+     * Whether this job is watched, either on its own or via its integration.
+     *
+     * @param DiscoveredIntegration $integration
+     * @param DiscoveredJob $job
+     * @return bool
+     */
+    private function isEffectivelyWatched(DiscoveredIntegration $integration, DiscoveredJob $job): bool
+    {
+        return $this->isWatched($integration) || $this->isJobWatched($job);
+    }
+
+    /**
+     * Everything the filter box matches this integration against.
+     *
+     * Built here rather than in the template so the page stays presentation
+     * only, and so the match surface is testable: a merchant hunting
+     * "ebizmarts" should find Mailchimp by job code, not just by name.
+     *
+     * @param DiscoveredIntegration $integration
+     * @return string
+     */
+    public function getSearchText(DiscoveredIntegration $integration): string
+    {
+        $parts = [
+            $integration->displayName,
+            $integration->vendorLabel,
+            $integration->packageName ?? $integration->moduleName,
+        ];
+
+        foreach ($integration->jobs as $job) {
+            $parts[] = $job->jobCode;
+        }
+
+        foreach ($integration->consumerNames as $consumerName) {
+            $parts[] = $consumerName;
+        }
+
+        return strtolower(trim(implode(' ', $parts)));
+    }
+
+    /**
+     * Where to send a merchant for the detail behind a failing integration.
+     *
+     * @return string
+     */
+    public function getDiagnosticsUrl(): string
+    {
+        return $this->url->getUrl('watchtower/diagnostics/index');
     }
 
     /**

@@ -19,6 +19,10 @@ define([
     $.widget('watchtower.watchtowerIntegrationHealth', {
         /** @inheritdoc */
         _create: function () {
+            this.element.on('input', '[data-role="integration-filter"]', function (event) {
+                this._filter($(event.target).val());
+            }.bind(this));
+
             this.element.on('change', '[data-role="integration-toggle"]', function (event) {
                 this._sync($(event.target).closest('[data-role="integration"]'));
             }.bind(this));
@@ -26,6 +30,48 @@ define([
             this.element.find('[data-role="integration"]').each(function (index, integration) {
                 this._sync($(integration));
             }.bind(this));
+        },
+
+        /**
+         * Hides integrations that do not match what was typed.
+         *
+         * Client-side and immediate: the whole set is already in the page, and
+         * a merchant filtering forty-two rows should not wait for a round
+         * trip. Sections whose every row is hidden collapse away too, so an
+         * empty "Magento's own scheduled jobs" heading is not left behind.
+         *
+         * @param {String} term
+         */
+        _filter: function (term) {
+            var needle = $.trim(String(term || '')).toLowerCase(),
+                anyVisible = false;
+
+            this.element.find('[data-role="integration"]').each(function () {
+                var row = $(this),
+                    matches = needle === '' || (row.attr('data-search') || '').indexOf(needle) !== -1;
+
+                row.toggle(matches);
+                anyVisible = anyVisible || matches;
+            });
+
+            this.element.find('details').each(function () {
+                var section = $(this),
+                    rows = section.find('[data-role="integration"]');
+
+                if (rows.length === 0) {
+                    return;
+                }
+
+                section.toggle(rows.filter(':visible').length > 0);
+
+                // A filtered section is useless collapsed, so open it while
+                // filtering and leave the merchant's own state alone otherwise.
+                if (needle !== '' && rows.filter(':visible').length > 0) {
+                    section.prop('open', true);
+                }
+            });
+
+            this.element.find('[data-role="filter-empty"]').prop('hidden', anyVisible || needle === '');
         },
 
         /**
