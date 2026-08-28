@@ -1,181 +1,253 @@
 # Watchtower Connector for Magento 2
 
-Watchtower Connector monitors a Magento 2 store and reports coarse anomaly
-statuses (normal / mild drop / severe drop / mild spike / severe spike /
-insufficient data) to the Watchtower platform, so a merchant learns about a
-broken checkout, a stalled integration, or a silent cron scheduler before a
-customer complains.
+Your checkout broke at 2am. Nobody noticed until a customer emailed at 9.
 
-The platform side lives at **[watchtower-commerce.com](https://watchtower-commerce.com)**;
-its [documentation](https://watchtower-commerce.com/docs) covers connecting a
-store, finding your API key, and what each signal means.
+Uptime monitors do not catch this. The site was up the whole time. It was
+returning 200s, serving pages, and quietly failing to take money.
 
-## How it works
+Watchtower Connector watches the things that actually mean your shop is
+working: orders completing, carts being created, customers signing in, your ERP
+sync still running, cron still ticking, queues still draining. When one of them
+stops behaving the way it normally does, you hear about it.
 
-All detection runs **locally, inside your store**: baseline computation,
-thresholds, debounce, and anomaly bucketing never leave the connector. The
-platform never receives raw order counts, customer data, or any other
-business metric — only a coarse status enum per tracked signal, plus
-metadata used for staleness detection and deduplication (sequence numbers,
-timestamps).
+The platform side lives at [watchtower-commerce.com](https://watchtower-commerce.com).
+The [documentation](https://watchtower-commerce.com/docs) covers creating a
+project, connecting a store, and what each signal means.
 
-Tracked signals:
+## Your numbers never leave your store
 
-- **`cron_health`** — is Magento's own cron scheduler still running? Ships
-  even on the platform's free tier; requires no store traffic to be useful.
-- **`checkout`**, **`basket_quote`**, **`customer_account`** — rate-based
-  signals comparing this hour's activity against your store's own historical
-  baseline for the same hour of day.
-- **`checkout_failure`** — the share of order placements that fail, against
-  fixed thresholds rather than a baseline, so it works from the first hour on a
-  store of any size.
-- **`admin_auth_failure`** — failed admin sign-ins, likewise threshold-based.
-  Install-scoped, since the admin panel is one per installation.
-- **`integration_health`** — an optional signal for the integrations you
-  choose to watch. The connector finds the scheduled jobs your store runs,
-  groups them under the extension that ships them, and measures how often each
-  really runs so there is no interval to configure. Integrations that run no
-  cron at all can emit a convention event instead.
-- **`indexer_health`** — are the indexers current, and is the materialized-view
-  backlog actually draining? Install-scoped.
-- **`queue_health`** — is queued work being drained, rather than sitting with
-  no consumer attached? Depth is never the judgement: a bulk import that queues
-  tens of thousands of messages is healthy while something is working through
-  them. Install-scoped.
+This matters enough to be the second thing on the page.
 
-`cron_health`, `admin_auth_failure`, `indexer_health` and `queue_health` are
-**install-scoped**: they describe the whole Magento installation, not one store
-view. The rest are reported per store view.
+Everything is worked out inside your Magento install. The baseline, the
+thresholds, the comparison, the decision that something looks wrong: all of it
+runs locally, on your own server.
+
+What gets sent is a word. `NORMAL`, or `SEVERE_DROP`, or `INSUFFICIENT_DATA`,
+per signal, per store view. Never an order count, a revenue figure, a customer
+name, a product, an email address, or an error message. This module's own test
+suite fails the build if anything beyond the documented fields reaches the
+payload, or if the API key ever turns up in a request body.
+
+So you can run this on a store whose numbers you would not share with anyone,
+and the answer to "what does Watchtower know about my business" stays "whether
+each signal looked normal this hour".
+
+## What it watches
+
+Nine signals. Some compare against your own history, some against fixed
+thresholds, some are a straight pass or fail.
+
+**Against your own baseline.** These learn what a normal Tuesday at 3pm looks
+like for your shop specifically, then tell you when this Tuesday at 3pm is not
+that. A store doing 40 orders a day and a store doing 40,000 each get judged
+against themselves.
+
+| Signal | Catches |
+|---|---|
+| `checkout` | Orders stopped completing |
+| `basket_quote` | Nobody is filling carts any more |
+| `customer_account` | Sign-ins and registrations fell off a cliff |
+
+**Against fixed thresholds.** No warm-up period. These work on your first day
+and on a store of any size, because "half of checkout attempts are failing" is
+bad regardless of what normal looks like for you.
+
+| Signal | Catches |
+|---|---|
+| `checkout_failure` | A payment method, a shipping rate call, or a tax service breaking order placement |
+| `admin_auth_failure` | A burst of failed admin sign-ins |
+
+**Pass or fail.** Infrastructure that either works or does not.
+
+| Signal | Catches |
+|---|---|
+| `cron_health` | Magento's scheduler stopped. Nothing else in Magento works properly when this happens, and stores run for days without noticing |
+| `integration_health` | Your ERP, PIM, marketplace or feed sync stopped running |
+| `indexer_health` | An indexer stuck invalid, or a materialized-view backlog nothing is draining |
+| `queue_health` | Queued work piling up with no consumer attached to it |
+
+`cron_health`, `admin_auth_failure`, `indexer_health` and `queue_health` cover
+the whole installation. The rest are reported per store view, so a problem on
+your German storefront does not get averaged away by a healthy UK one.
+
+### How fast you hear about it
+
+Signals are evaluated once an hour, on the last complete hour, and a change is
+only reported once it has held for two consecutive evaluations. In practice
+that means **about one to two hours** from a problem starting to an alert
+arriving.
+
+That two-evaluation wait is deliberate. Monitoring you learn to ignore is worse
+than none, and a single odd hour is usually just a quiet hour.
+
+### Integrations, without the guesswork
+
+`integration_health` is the one signal you choose the contents of, and it tries
+hard not to make that your problem.
+
+The connector reads the scheduled jobs your store actually runs and groups them
+under the extension that installed them, so you tick **Mailchimp** rather than
+hunting for `ebizmarts_ecommerce` among sixty-odd job codes. Pick as many as
+you like.
+
+There is no interval to enter. The connector measures how often each job really
+runs on your server and judges it against that. A nightly sync gets judged as a
+nightly sync. A job that runs every five minutes gets five minutes. Get that
+number wrong by hand and you either miss real outages or cry wolf every night,
+which is why the connector works it out instead of asking you.
+
+Integrations that run no cron at all, like an ERP pushing into Magento over the
+API, can send a `watchtower_integration_health` event from your own code and
+appear in the same list.
 
 ## Requirements
 
-- Magento **2.4.7, 2.4.8 or 2.4.9** (what the `magento/framework` `103.0.*`
-  constraint below resolves to). Development and release verification run
-  against 2.4.9.
-- PHP `~8.3.0||~8.4.0||~8.5.0`
-- `magento/framework` `103.0.*`
-- `magento/framework-amqp` `100.4.*`
-- `magento/framework-bulk` `101.0.*`
-- `magento/framework-message-queue` `100.4.*`
-- `magento/module-asynchronous-operations` `100.4.*`
-- `magento/module-backend` `102.0.*`
-- `magento/module-config` `101.2.*`
-- `magento/module-cron` `100.4.*`
-- `magento/module-store` `101.1.*`
+- **Magento 2.4.7, 2.4.8 or 2.4.9** (Open Source or Adobe Commerce on-prem)
+- **PHP 8.3, 8.4 or 8.5**
 
-`composer.json` is the authoritative constraint; the list above is generated
-from it.
+Magento's own cron must be running. If it is not, this module cannot do
+anything, and `cron_health` is the signal that would have told you.
 
-## Installation
+<details>
+<summary>Exact Composer constraints</summary>
+
+```
+php                                      ~8.3.0||~8.4.0||~8.5.0
+magento/framework                        103.0.*
+magento/framework-amqp                   100.4.*
+magento/framework-bulk                   101.0.*
+magento/framework-message-queue          100.4.*
+magento/module-asynchronous-operations   100.4.*
+magento/module-backend                   102.0.*
+magento/module-config                    101.2.*
+magento/module-cron                      100.4.*
+magento/module-store                     101.1.*
+```
+
+`composer.json` is authoritative; this list is generated from it.
+</details>
+
+## Install
 
 ```
 composer require php4u/module-watchtower-m2-connector
 bin/magento module:enable Watchtower_Connector
 bin/magento setup:upgrade
-```
-
-A full `setup:di:compile` and cache flush is recommended after enabling, as
-with any new module:
-
-```
 bin/magento setup:di:compile
 bin/magento cache:flush
 ```
 
-## Configuration
+Then go to **Stores > Configuration > Watchtower > Connection** and fill in two
+fields:
 
-Go to **Stores > Configuration > Watchtower > Connection**:
-
-| Field | What it's for |
+| Field | What to put in it |
 |---|---|
-| **Watchtower Base URL** | The base URL of your Watchtower platform instance. Pre-filled with the live Watchtower platform; only change this for a custom deployment. |
-| **Install API Key** | The install-scoped API key generated for this install on the [Watchtower projects page](https://watchtower-commerce.com/docs/connecting-magento-2/add-the-magento-2-connector). Stored encrypted. See [where to find and rotate your API key](https://watchtower-commerce.com/docs/connecting-magento-2/where-to-find-and-rotate-your-api-key) if you already have a project. |
-| **Enabled** | Master on/off switch. Disabling stops the connector from syncing, evaluating, or submitting anything — without discarding your saved configuration. |
+| **Watchtower Base URL** | Already filled in with the live platform. Only change it for a self-hosted deployment. |
+| **Install API Key** | The key from your Watchtower project. Stored encrypted. |
+| **Enabled** | Turns the whole module on and off without losing your settings. |
 
-Don't have a Watchtower project yet? See [how to create a project and get an
-API key](https://watchtower-commerce.com/docs/connecting-magento-2/add-the-magento-2-connector).
+Click **Test Connection** to check the key before waiting for the next cron
+run. No project yet? [Create one and get a key](https://watchtower-commerce.com/docs/connecting-magento-2/add-the-magento-2-connector).
+Already have one? [Find or rotate your key](https://watchtower-commerce.com/docs/connecting-magento-2/where-to-find-and-rotate-your-api-key).
 
-After saving, click **Test Connection** on the same page to confirm the URL
-and key are valid before waiting for the next scheduled cron cycle. The same
-check is available from the command line:
+Some signals report immediately. The baseline-driven ones seed from your
+existing order and cart history at install time, so they usually have something
+useful to say within a day rather than after a month of watching.
+
+## Running it
+
+### For devops
+
+**Cron.** One job, `watchtower_report`, is polled every five minutes and does
+real work roughly once an hour. It tracks elapsed time since its last real run
+rather than watching for a particular minute, so it self-corrects if your host
+runs `cron:run` irregularly, and installs naturally spread themselves across
+the hour instead of all reporting at once. `watchtower_sync` and
+`watchtower_rollup_prune` run daily. None of it needs configuring.
+
+The module can only run as often as `bin/magento cron:run` is invoked. Magento
+recommends every minute; every five minutes is the practical floor here.
+
+**Storefront cost.** Nothing runs in a shopper's request. Observation is cheap
+and writes to the module's own tables; all evaluation and network traffic
+happens in cron.
+
+**When the platform is unreachable.** Reports are buffered locally and
+backfilled on reconnect, with exponential backoff between attempts. An outage
+at our end produces a delayed catch-up, not a hole in your history.
+
+**Diagnostics over SSH**, without needing admin access:
 
 ```
-bin/magento watchtower:ping
+bin/magento watchtower:status
 ```
 
-## CLI commands
+Connection state, buffer backlog, per-signal status and sequence numbers, and
+the most recent submission outcomes including anything the platform rejected
+and why. The admin **Diagnostics** page shows the same thing.
 
 | Command | What it does |
 |---|---|
-| `watchtower:ping` | Checks connectivity to the configured Watchtower platform. |
-| `watchtower:sync` | Reports this install's live store views to Watchtower now. |
-| `watchtower:report` | Evaluates tracked signals and submits any due reports to Watchtower now. |
-| `watchtower:status` | Prints diagnostics: connection state, buffer backlog, and per-signal status — the same data the admin Diagnostics page shows, headlessly. Useful for support to run over SSH. |
-| `watchtower:coverage` | Seeds and reports local historical baseline coverage for every live store view. |
-| `watchtower:rollup-prune` | Rolls aged hourly counters into daily rollups and prunes both tables to their retention window now. |
+| `watchtower:ping` | Check connectivity and key validity |
+| `watchtower:status` | Full local diagnostics |
+| `watchtower:sync` | Push this install's store views now |
+| `watchtower:report` | Evaluate and submit now |
+| `watchtower:coverage` | Report and seed local baseline history |
+| `watchtower:rollup-prune` | Roll up and prune aged counters now |
 
-All of these also run automatically on a schedule (see below); the CLI forms
-exist for on-demand checks and troubleshooting.
+All of these run on a schedule already. The commands exist for setup checks and
+troubleshooting.
 
-## Admin pages
+### For developers
 
-Under the **Watchtower** menu:
+Detection lives in `Model/`, one directory per signal, each with its own
+evaluator. The wire contract, including payload shape, evaluation cadence,
+debounce rules and the privacy boundary, is specified on the platform side
+rather than invented here.
 
-- **Integrations** — pick which integrations `integration_health` watches,
-  discovered for you and named by the extension that ships them, as many as
-  you like per install. No interval to enter: the window comes from each job's
-  measured cadence. Integrations that run no cron appear under **Custom
-  integrations**, listing the `watchtower_integration_health` events the
-  connector has actually received. Nothing selected means the signal is not
-  evaluated, and every other signal keeps working regardless.
-- **Diagnostics** — connection state, last successful submission, buffered
-  report backlog, dropped-event count, every live store view's per-signal
-  status and sequence number, and the most recent submission outcomes
-  (accepted/rejected, with reasons). The same data `watchtower:status`
-  prints on the command line.
+Each signal versions its own `ruleset_version` independently, and reports it on
+every submission, so the platform always knows which logic produced a given
+status:
 
-## Cron schedule
+| Signal | Constant |
+|---|---|
+| `cron_health` | `Model/CronHealth/Evaluator::RULESET_VERSION` |
+| `checkout`, `basket_quote`, `customer_account` | `Model/RateSignal/DispersionEvaluator::RULESET_VERSION` |
+| `checkout_failure` | `Model/CheckoutFailure/Evaluator::RULESET_VERSION` |
+| `admin_auth_failure` | `Model/AdminAuthFailure/Evaluator::RULESET_VERSION` |
+| `integration_health` | `Model/IntegrationHealth/WatchedSetEvaluator::RULESET_VERSION` |
+| `indexer_health` | `Model/IndexerHealth/Evaluator::RULESET_VERSION` |
+| `queue_health` | `Model/QueueHealth/Evaluator::RULESET_VERSION` |
 
-`watchtower_report` is polled every 5 minutes, but only actually evaluates
-and submits roughly once an hour, tracked by elapsed time since its last
-real run rather than a fixed wall-clock minute — so it self-corrects
-regardless of how often your host's own system cron actually invokes
-`bin/magento cron:run`, and naturally avoids every installation of this
-module submitting at the same moment. `watchtower_sync` and
-`watchtower_rollup_prune` both run once daily. None of this requires
-configuration; it's automatic once Magento's own cron is running — though
-the module can only ever run as often as `bin/magento cron:run` itself is
-actually invoked, so make sure your host's cron entry for it runs at least
-every 5 minutes (Magento's own recommendation is every 1 minute).
+There is deliberately no single module-wide version pinned to the spec. Changing
+how one signal computes its baseline says nothing about the others, and one
+number would hide that.
+
+**Tests.** The unit suite lives in `Test/Unit` and needs the PHPUnit that ships
+with Magento 2.4.9 (PHPUnit 12). It uses attribute-based data providers and
+assertion helpers that PHPUnit 9 and 10, shipped with 2.4.7 and 2.4.8, do not
+have. The module itself runs on all three; only its own test suite is pinned to
+the newest.
+
+**Emitting a custom integration signal** from your own module:
+
+```php
+$this->eventManager->dispatch('watchtower_integration_health', [
+    'integration' => 'acme_erp',   // appears in the admin once we have seen it
+    'status'      => 'ok',          // or 'failed'
+    'store_id'    => $storeId,      // optional, defaults to current store
+]);
+```
+
+Send it once and the label becomes selectable under **Watchtower >
+Integrations**. The connector measures how often it arrives and alerts when it
+stops. You cannot type a label in by hand, deliberately: a typo would sit there
+looking healthy forever while the integration behind it was dead.
 
 ## License
 
-This module ships under the [Business Source License 1.1](./LICENSE)
-(SPDX: `BUSL-1.1`). You can read, audit, and run it to monitor your own
-Magento store(s), including in production; you can't use it, in whole or
-in part, to offer a competing commercial monitoring or alerting service.
-On 2029-08-14 it automatically converts to the MIT License. See
-[`LICENSE`](./LICENSE) for the full, governing terms.
+[Business Source License 1.1](./LICENSE) (`BUSL-1.1`).
 
-## Compatibility
-
-The wire protocol this connector speaks against the Watchtower platform is
-currently at **spec version 2.4**.
-
-There is deliberately no single "module version pinned to the spec version"
-number. Each tracked signal's evaluator versions its own `ruleset_version`
-independently, since a change to one signal's baseline logic (e.g. the
-dispersion-based bound `checkout`/`basket_quote`/`customer_account` use)
-doesn't necessarily mean every other signal's detection logic changed too:
-
-- `cron_health` — `Model/CronHealth/Evaluator::RULESET_VERSION`
-- `checkout` / `basket_quote` / `customer_account` — `Model/RateSignal/DispersionEvaluator::RULESET_VERSION`
-- `checkout_failure` — `Model/CheckoutFailure/Evaluator::RULESET_VERSION`
-- `admin_auth_failure` — `Model/AdminAuthFailure/Evaluator::RULESET_VERSION`
-- `integration_health` — `Model/IntegrationHealth/WatchedSetEvaluator::RULESET_VERSION`
-- `indexer_health` — `Model/IndexerHealth/Evaluator::RULESET_VERSION`
-- `queue_health` — `Model/QueueHealth/Evaluator::RULESET_VERSION`
-
-Each is reported per-signal on every submitted report, so the platform
-always knows exactly which baseline logic produced a given status — a
-single module-wide version number would only obscure that.
+Read it, audit it, run it in production to monitor your own stores. You cannot
+use it to build a competing commercial monitoring service. On 2029-08-14 it
+converts to MIT. The [`LICENSE`](./LICENSE) file governs.
