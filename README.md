@@ -24,9 +24,10 @@ runs locally, on your own server.
 
 What gets sent is a word. `NORMAL`, or `SEVERE_DROP`, or `INSUFFICIENT_DATA`,
 per signal, per store view. Never an order count, a revenue figure, a customer
-name, a product, an email address, or an error message. This module's own test
-suite fails the build if anything beyond the documented fields reaches the
-payload, or if the API key ever turns up in a request body.
+name, a product, an email address, or an error message. The build fails if
+anything beyond the documented fields reaches the payload, or if the API key
+ever turns up in a request body. Those tests live in the source repository, so
+you can read them rather than take our word for it.
 
 So you can run this on a store whose numbers you would not share with anyone,
 and the answer to "what does Watchtower know about my business" stays "whether
@@ -223,11 +224,12 @@ There is deliberately no single module-wide version pinned to the spec. Changing
 how one signal computes its baseline says nothing about the others, and one
 number would hide that.
 
-**Tests.** The unit suite lives in `Test/Unit` and needs the PHPUnit that ships
-with Magento 2.4.9 (PHPUnit 12). It uses attribute-based data providers and
-assertion helpers that PHPUnit 9 and 10, shipped with 2.4.7 and 2.4.8, do not
-have. The module itself runs on all three; only its own test suite is pinned to
-the newest.
+**Tests.** The unit suite lives in `Test/Unit` in the source repository and
+runs on all three supported versions, against the PHPUnit each one ships:
+9.6 on 2.4.7, 10.5 on 2.4.8, 12.5 on 2.4.9.
+
+It is `export-ignore`d, so a Composer install gives you the module without the
+tests. Clone the repository if you want to run or read them.
 
 **Emitting a custom integration signal** from your own module:
 
