@@ -102,7 +102,21 @@ class IntegrationDiscovery
                 }
 
                 $instance = is_array($config) ? (string) ($config['instance'] ?? '') : '';
-                $module = $instance !== '' ? $this->moduleAttribution->moduleForClass($instance) : null;
+
+                // A declared job with no instance class cannot be executed, so
+                // it is never a usable signal. These are not hand-written: a
+                // crontab.xml <config_path> pointing at a different job code
+                // than its own <job name> makes Magento's DB config reader
+                // mint a second, class-less entry. On a real store that
+                // produced catalog_product_alert, which Magento schedules and
+                // then fails every single time, and magedelight_facebook,
+                // which has never been scheduled at all. Offering either one
+                // hands the merchant a job that can only ever look broken.
+                if ($instance === '') {
+                    continue;
+                }
+
+                $module = $this->moduleAttribution->moduleForClass($instance);
                 $schedule = is_array($config) && isset($config['schedule']) ? (string) $config['schedule'] : null;
 
                 $byModule[$module ?? self::UNATTRIBUTED_MODULE][] = new DiscoveredJob(

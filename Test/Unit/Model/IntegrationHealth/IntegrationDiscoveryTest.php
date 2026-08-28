@@ -33,6 +33,9 @@ class IntegrationDiscoveryTest extends TestCase
             'ebizmarts_clean_batches' => ['instance' => 'Ebizmarts\MailChimp\Cron\Clean', 'schedule' => '0 * * * *'],
             'catalog_index_refresh_price' => ['instance' => 'Magento\Catalog\Cron\Refresh', 'schedule' => '0 * * * *'],
             'watchtower_report' => ['instance' => 'Watchtower\Connector\Cron\ReportJob', 'schedule' => '*/5 * * * *'],
+            // A crontab.xml <config_path> naming a different job code than its
+            // own <job name> makes Magento mint a second, class-less entry.
+            'catalog_product_alert' => ['schedule' => '0 * * * *'],
         ],
     ];
 
@@ -54,6 +57,21 @@ class IntegrationDiscoveryTest extends TestCase
             ['ebizmarts_clean_batches', 'ebizmarts_ecommerce'],
             array_map(static fn ($j) => $j->jobCode, $mailchimp->jobs)
         );
+    }
+
+    /**
+     * A declared job with no instance class cannot run, so offering it hands
+     * the merchant something that can only ever look broken. On a real store
+     * this produced catalog_product_alert, which Magento schedules and then
+     * fails every time, and magedelight_facebook, which never ran at all.
+     */
+    public function testExcludesDeclaredJobsThatHaveNoInstanceClass(): void
+    {
+        foreach ($this->discover() as $integration) {
+            foreach ($integration->jobs as $job) {
+                self::assertNotSame('catalog_product_alert', $job->jobCode);
+            }
+        }
     }
 
     /**
