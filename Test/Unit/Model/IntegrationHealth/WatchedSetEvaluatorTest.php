@@ -238,6 +238,95 @@ class WatchedSetEvaluatorTest extends TestCase
      * @param IntegrationHealthState|null $saved receives the state this tick persisted
      * @return MetricReport
      */
+    /**
+     * The regression that let a live install show a week of false green: the
+     * 1.27.0 upgrade emptied its watched set, and the heartbeat replayed the
+     * last confirmed NORMAL hourly for a set nobody was watching any more.
+     */
+    public function testAnEmptiedWatchedSetHeartbeatsInsufficientDataRatherThanItsLastHealthyVerdict(): void
+    {
+        $report = $this->retire(SignalStatus::Normal);
+
+        self::assertSame(SignalStatus::InsufficientData, $report->status);
+    }
+
+    public function testAnEmptiedWatchedSetDowngradesAnAnomalousVerdictToo(): void
+    {
+        // A set nobody watches can no longer be observed to recover, so the
+        // anomaly must not persist either.
+        $report = $this->retire(SignalStatus::SevereDrop);
+
+        self::assertSame(SignalStatus::InsufficientData, $report->status);
+    }
+
+    /**
+     * Silence, not a status, when there is nothing to retire: a store view that
+     * never reported has no signal for the platform's staleness sweep to miss.
+     */
+    public function testAStoreViewThatNeverReportedIsNotHeartbeatedAtAll(): void
+    {
+        self::assertNull($this->retire(null));
+    }
+
+    /**
+     * Clearing the fingerprint is what makes re-selecting the same set later
+     * re-seed rather than resume on a verdict about the retired one.
+     */
+    public function testRetiringClearsTheSetFingerprint(): void
+    {
+        $saved = null;
+        $this->retire(SignalStatus::Normal, $saved);
+
+        self::assertNull($saved->sourceIdentifier);
+        self::assertSame(SignalStatus::InsufficientData, $saved->confirmedStatus);
+    }
+
+    /**
+     * Runs the empty-watched-set path against a store view whose last confirmed
+     * status was $confirmed (null meaning it never reported).
+     *
+     * @param SignalStatus|null $confirmed
+     * @param IntegrationHealthState|null $saved
+     * @return MetricReport|null
+     */
+    private function retire(
+        ?SignalStatus $confirmed,
+        ?IntegrationHealthState &$saved = null
+    ): ?MetricReport {
+        $stateRepository = $this->createStub(IntegrationHealthStateRepository::class);
+        $stateRepository->method('save')->willReturnCallback(
+            function (IntegrationHealthState $state) use (&$saved): void {
+                $saved = $state;
+            }
+        );
+        $stateRepository->method('get')->willReturn(new IntegrationHealthState(
+            storeViewId: self::STORE_VIEW_ID,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            pendingStatus: null,
+            confirmedStatus: $confirmed,
+            sequenceNumber: 5,
+            lastReportedReason: ReportReason::Heartbeat,
+            sourceType: WatchedSetEvaluator::SOURCE_TYPE,
+            sourceIdentifier: $this->fingerprint(['ebizmarts_ecommerce']),
+            observingSince: null,
+        ));
+
+        $evaluator = new WatchedSetEvaluator(
+            $stateRepository,
+            $this->createStub(JobRunObservationRepository::class),
+            new CadenceEstimator(),
+            $this->createStub(CronJobObserver::class),
+            $this->createStub(IntegrationHealthEventRepository::class)
+        );
+
+        return $evaluator->heartbeatRetiredIfPreviouslyReported(
+            self::STORE_VIEW_ID,
+            self::STORE_VIEW_CODE,
+            $this->now()
+        );
+    }
+
     private function evaluate(
         array $jobCodes,
         array $successes,

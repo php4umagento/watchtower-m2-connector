@@ -5,6 +5,20 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.29.0] - 2026-09-01
+
+Stops `integration_health` reporting a healthy status for a store whose
+watched set is empty. When the set is emptied the signal kept heartbeating its
+last confirmed verdict, so a store that lost its selection reported `NORMAL`
+every hour while nothing was being watched at all; it now reports
+`INSUFFICIENT_DATA`, which keeps the platform's staleness sweep quiet without
+claiming health.
+
+If **Watchtower > Integrations** shows nothing selected, re-select the
+integrations you want watched: an install that upgraded from 1.24.x or earlier
+straight to 1.27.0 or later skipped the migration that carried the old
+per-store-view sources over.
+
 ## [1.28.0] - 2026-08-28
 
 Reworks the **Watchtower > Integrations** page after reviewing it on a store

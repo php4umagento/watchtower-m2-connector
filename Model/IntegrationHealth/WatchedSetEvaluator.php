@@ -108,10 +108,10 @@ class WatchedSetEvaluator
     /**
      * Keeps a previously-reported store view alive after its watched set is emptied.
      *
-     * Null when it never reported at all. The platform's staleness sweep has no
-     * concept of a deliberately retired signal, so going silent would alert
-     * forever. An anomalous status is downgraded first, since a set nobody
-     * watches can no longer be observed to recover.
+     * Null when it never reported at all: the platform's staleness sweep has no
+     * concept of a retired signal, so going silent would alert forever. Always
+     * INSUFFICIENT_DATA rather than the last confirmed verdict, because
+     * replaying a NORMAL asserts health about a set nobody is watching.
      *
      * @param int $storeViewId
      * @param string $storeViewCode
@@ -129,9 +129,7 @@ class WatchedSetEvaluator
             return null;
         }
 
-        $retiredStatus = $this->isAnomalous($state->confirmedStatus)
-            ? SignalStatus::InsufficientData
-            : $state->confirmedStatus;
+        $retiredStatus = SignalStatus::InsufficientData;
 
         // Fingerprint cleared so re-selecting the same set later re-seeds
         // rather than resuming on a verdict about a since-retired one.
