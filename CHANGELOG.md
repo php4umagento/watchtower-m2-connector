@@ -5,6 +5,15 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.30.0] - 2026-09-02
+
+The **Watchtower > Diagnostics** page now reads as merchant-facing status,
+not internal wire state. A store view still building its baseline shows a
+calm "Warming up" note instead of the same red "Needs attention" banner a
+real anomaly gets, status and reason values are plain English ("Warming up",
+"Routine check-in") instead of raw values like `INSUFFICIENT_DATA`, and the
+internal Sequence Number column is gone.
+
 ## [1.29.0] - 2026-09-01
 
 Stops `integration_health` reporting a healthy status for a store whose
