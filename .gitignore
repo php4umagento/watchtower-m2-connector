@@ -10,3 +10,8 @@
 # release-process details in here are not meant to go out with it. Keep
 # local-only -- never commit.
 /CLAUDE.md
+
+# Output of bin/build-marketplace-release.sh -- generated per release, never
+# tracked (the zip is what gets uploaded to Marketplace directly, not stored
+# here).
+/build/
