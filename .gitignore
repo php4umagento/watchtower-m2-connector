@@ -15,3 +15,8 @@
 # tracked (the zip is what gets uploaded to Marketplace directly, not stored
 # here).
 /build/
+
+# Marketplace listing assets (screenshots, copy, install guide) -- these are
+# release/marketing deliverables for the Marketplace submission form itself,
+# not module source, and are not meant to ship in the module's own zip.
+/marketplace-assets/

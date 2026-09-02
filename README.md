@@ -151,9 +151,13 @@ Click **Test Connection** to check the key before waiting for the next cron
 run. No project yet? [Create one and get a key](https://watchtower-commerce.com/docs/connecting-magento-2/add-the-magento-2-connector).
 Already have one? [Find or rotate your key](https://watchtower-commerce.com/docs/connecting-magento-2/where-to-find-and-rotate-your-api-key).
 
-Some signals report immediately. The baseline-driven ones seed from your
-existing order and cart history at install time, so they usually have something
-useful to say within a day rather than after a month of watching.
+Some signals report immediately. `checkout` and `basket_quote` seed their
+baseline from your existing order and cart history at install time, so they
+usually have something useful to say within a day rather than after weeks of
+watching. `customer_account` cannot be seeded this way (there is no historical
+log to seed sign-ins and registrations from), so it always starts cold and
+needs several weeks of live activity to establish its own baseline, the same
+as a brand new store would for any signal.
 
 ## Running it
 
@@ -163,8 +167,9 @@ useful to say within a day rather than after a month of watching.
 real work roughly once an hour. It tracks elapsed time since its last real run
 rather than watching for a particular minute, so it self-corrects if your host
 runs `cron:run` irregularly, and installs naturally spread themselves across
-the hour instead of all reporting at once. `watchtower_sync` and
-`watchtower_rollup_prune` run daily. None of it needs configuring.
+the hour instead of all reporting at once. `watchtower_sync`,
+`watchtower_rollup_prune` and `watchtower_event_counter_prune` run daily.
+None of it needs configuring.
 
 The module can only run as often as `bin/magento cron:run` is invoked. Magento
 recommends every minute; every five minutes is the practical floor here.
@@ -194,6 +199,7 @@ and why. The admin **Diagnostics** page shows the same thing.
 | `watchtower:sync` | Push this install's store views now |
 | `watchtower:report` | Evaluate and submit now |
 | `watchtower:coverage` | Report and seed local baseline history |
+| `watchtower:event-counter-prune` | Prune every raw event counter table past retention now |
 | `watchtower:rollup-prune` | Roll up and prune aged counters now |
 
 All of these run on a schedule already. The commands exist for setup checks and
