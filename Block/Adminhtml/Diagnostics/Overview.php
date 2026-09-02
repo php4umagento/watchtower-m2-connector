@@ -10,6 +10,7 @@ namespace Watchtower\Connector\Block\Adminhtml\Diagnostics;
 
 use Magento\Backend\Block\Template;
 use Magento\Backend\Block\Template\Context;
+use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
@@ -78,25 +79,45 @@ class Overview extends Template
     }
 
     /**
-     * The status label for a signal, or a fallback for one never reported.
+     * The merchant-facing status label for a signal, matching the wording the
+     * Watchtower dashboard itself uses for the same statuses, or a fallback
+     * for one never reported.
      *
      * @param SignalSnapshot $signal
      * @return string
      */
     public function statusLabel(SignalSnapshot $signal): string
     {
-        return $signal->status?->value ?? 'no data yet';
+        if ($signal->status === null) {
+            return 'No data yet';
+        }
+
+        return match ($signal->status) {
+            SignalStatus::Normal => 'Normal',
+            SignalStatus::MildDrop => 'Mild drop',
+            SignalStatus::SevereDrop => 'Severe drop',
+            SignalStatus::MildSpike => 'Mild spike',
+            SignalStatus::SevereSpike => 'Severe spike',
+            SignalStatus::InsufficientData => 'Warming up',
+        };
     }
 
     /**
-     * The reason label for a signal's last report, or a fallback for one never reported.
+     * The merchant-facing reason label for a signal's last report, or a fallback for one never reported.
      *
      * @param SignalSnapshot $signal
      * @return string
      */
     public function reasonLabel(SignalSnapshot $signal): string
     {
-        return $signal->reason?->value ?? 'no data yet';
+        if ($signal->reason === null) {
+            return 'No data yet';
+        }
+
+        return match ($signal->reason) {
+            ReportReason::Heartbeat => 'Routine check-in',
+            ReportReason::Transition => 'Status changed',
+        };
     }
 
     /**
@@ -149,9 +170,12 @@ class Overview extends Template
     }
 
     /**
-     * Whether a store view has any signal in a non-NORMAL state, so its
-     * collapsible block can default to expanded -- a store view with a real
-     * problem should never be hidden behind an extra click.
+     * Whether a store view has a signal genuinely worth a merchant's
+     * attention, so its collapsible block can default to expanded -- a real
+     * problem should never be hidden behind an extra click. Still building a
+     * baseline (InsufficientData) is excluded on purpose: it is expected and
+     * temporary, not something wrong, and storeViewWarmingUp() below covers
+     * it with a calmer note instead.
      *
      * @param StoreViewSnapshot $storeView
      * @return bool
@@ -159,7 +183,29 @@ class Overview extends Template
     public function storeViewNeedsAttention(StoreViewSnapshot $storeView): bool
     {
         foreach ($storeView->signals as $signal) {
-            if ($signal->status !== null && $signal->status !== SignalStatus::Normal) {
+            if ($signal->status !== null
+                && $signal->status !== SignalStatus::Normal
+                && $signal->status !== SignalStatus::InsufficientData) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a store view has a signal still building its baseline and
+     * nothing worse -- shown as a calm "Warming up" note rather than the
+     * "Needs attention" treatment storeViewNeedsAttention() reserves for an
+     * actual anomaly.
+     *
+     * @param StoreViewSnapshot $storeView
+     * @return bool
+     */
+    public function storeViewWarmingUp(StoreViewSnapshot $storeView): bool
+    {
+        foreach ($storeView->signals as $signal) {
+            if ($signal->status === SignalStatus::InsufficientData) {
                 return true;
             }
         }

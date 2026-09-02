@@ -172,7 +172,6 @@ $versionState = $snapshot->connectorVersion;
                 <th class="data-grid-th"><?= $escaper->escapeHtml(__('Signal')) ?></th>
                 <th class="data-grid-th"><?= $escaper->escapeHtml(__('Status')) ?></th>
                 <th class="data-grid-th"><?= $escaper->escapeHtml(__('Reason')) ?></th>
-                <th class="data-grid-th"><?= $escaper->escapeHtml(__('Sequence Number')) ?></th>
             </tr>
             </thead>
             <tbody>
@@ -183,9 +182,6 @@ $versionState = $snapshot->connectorVersion;
                 </td>
                 <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($snapshot->cronHealth)) ?></td>
                 <td class="data-grid-td"><?= $escaper->escapeHtml($block->reasonLabel($snapshot->cronHealth)) ?></td>
-                <td class="data-grid-td">
-                    <?= $escaper->escapeHtml((string) $snapshot->cronHealth->sequenceNumber) ?>
-                </td>
             </tr>
             </tbody>
         </table>
@@ -196,6 +192,7 @@ $versionState = $snapshot->connectorVersion;
         // never hidden behind an extra click. ?>
         <?php foreach ($snapshot->storeViews as $storeView): ?>
             <?php $needsAttention = $block->storeViewNeedsAttention($storeView); ?>
+            <?php $warmingUp = $block->storeViewWarmingUp($storeView); ?>
             <details class="details admin__collapsible-block-wrapper"<?= $needsAttention ? ' open' : '' ?>>
                 <summary class="details-summary admin__collapsible-title">
                     <span>
@@ -206,6 +203,8 @@ $versionState = $snapshot->connectorVersion;
                         <strong class="watchtower-eol-warning">
                             <?= $escaper->escapeHtml(__('Needs attention')) ?>
                         </strong>
+                    <?php elseif ($warmingUp): ?>
+                        <span><?= $escaper->escapeHtml(__('Warming up')) ?></span>
                     <?php endif; ?>
                 </summary>
                 <div class="details-content admin__fieldset">
@@ -215,7 +214,6 @@ $versionState = $snapshot->connectorVersion;
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Signal')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Status')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Reason')) ?></th>
-                            <th class="data-grid-th"><?= $escaper->escapeHtml(__('Sequence Number')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Outage Detection')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Driven By')) ?></th>
                             <th class="data-grid-th"><?= $escaper->escapeHtml(__('Seed Coverage')) ?></th>
@@ -227,9 +225,6 @@ $versionState = $snapshot->connectorVersion;
                                 <td class="data-grid-td"><?= $escaper->escapeHtml($signal->category) ?></td>
                                 <td class="data-grid-td"><?= $escaper->escapeHtml($block->statusLabel($signal)) ?></td>
                                 <td class="data-grid-td"><?= $escaper->escapeHtml($block->reasonLabel($signal)) ?></td>
-                                <td class="data-grid-td">
-                                    <?= $escaper->escapeHtml((string) $signal->sequenceNumber) ?>
-                                </td>
                                 <td class="data-grid-td">
                                     <?= $escaper->escapeHtml($block->detectionLatencyLabel($signal)) ?>
                                 </td>
