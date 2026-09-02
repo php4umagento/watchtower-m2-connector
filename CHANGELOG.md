@@ -5,6 +5,14 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.30.1] - 2026-09-02
+
+Packaging fix only, no code change. The distributed package now excludes
+`docs/`, `README.md`, `CHANGELOG.md`, `phpcs.xml`, `phpstan.neon`, and
+`bin/`, none of which Magento reads at runtime, alongside `Test/` which
+was already excluded. `docs/` in particular named a real merchant's
+store in an internal design record.
+
 ## [1.30.0] - 2026-09-02
 
 The **Watchtower > Diagnostics** page now reads as merchant-facing status,
