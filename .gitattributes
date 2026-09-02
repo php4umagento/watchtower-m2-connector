@@ -1,5 +1,15 @@
 # Excluded from a composer/git-archive distribution (e.g. `composer create-project`
-# or a tagged release tarball), but still tracked in the repository itself.
+# or a Marketplace release package), but still tracked in the repository
+# itself. The shipped package is the Magento module plus LICENSE only --
+# nothing here is read by Magento at runtime, and docs/ in particular names a
+# real merchant's store in an internal design record that has no reason to
+# leave this repo.
 /Test export-ignore
+/docs export-ignore
+/bin export-ignore
+/README.md export-ignore
+/CHANGELOG.md export-ignore
+/phpcs.xml export-ignore
+/phpstan.neon export-ignore
 /.gitattributes export-ignore
 /.gitignore export-ignore
