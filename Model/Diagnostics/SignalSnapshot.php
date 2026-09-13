@@ -33,6 +33,10 @@ class SignalSnapshot
      * @param SeedCoverageResult|null $seedCoverage the last persisted local-baseline seeding outcome for
      *     this signal, or null if it has never been seeded (cron_health/integration_health included,
      *     since neither is a HistorySeeder category)
+     * @param string|null $corroboratingCategory the earlier-funnel category consulted when this signal
+     *     is INSUFFICIENT_DATA from low volume (see FunnelCorroboration), or null if none is mapped
+     * @param SignalStatus|null $corroboratingStatus $corroboratingCategory's own current confirmed
+     *     status, or null if there is no corroborating category or it has never been evaluated
      */
     public function __construct(
         public readonly string $category,
@@ -42,6 +46,8 @@ class SignalSnapshot
         public readonly ?float $estimatedDetectionLatencyHours = null,
         public readonly array $ensembleDrivingChecks = [],
         public readonly ?SeedCoverageResult $seedCoverage = null,
+        public readonly ?string $corroboratingCategory = null,
+        public readonly ?SignalStatus $corroboratingStatus = null,
     ) {
     }
 }

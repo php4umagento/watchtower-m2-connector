@@ -5,6 +5,13 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.31.0] - 2026-09-13
+
+When `checkout` reports "Warming up" from low volume, the Diagnostics page
+and `watchtower:status` now say whether cart activity looks normal (likely
+just a quiet stretch) or is flat too (no funnel activity detected), instead
+of leaving the merchant to guess. Local diagnostics only, no wire change.
+
 ## [1.30.1] - 2026-09-02
 
 Packaging fix only, no code change. The distributed package now excludes

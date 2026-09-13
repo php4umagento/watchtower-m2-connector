@@ -23,6 +23,7 @@ use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
 use Watchtower\Connector\Model\Environment\ConnectorVersionState;
 use Watchtower\Connector\Model\Environment\EnvironmentState;
 use Watchtower\Connector\Model\QueueHealth\Observation as QueueHealthObservation;
+use Watchtower\Connector\Model\Diagnostics\CorroborationLabel;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedSetEvaluator;
 use Watchtower\Connector\Model\QueueHealth\QueueStateObserver;
@@ -405,6 +406,45 @@ class StatusCommandTest extends TestCase
         self::assertStringContainsString('no integrations selected', $tester->getDisplay());
     }
 
+    /**
+     * CorroborationLabel is a real (not stubbed) collaborator here, so this
+     * proves the CLI actually renders its output for a signal carrying
+     * corroboration fields, matching the admin page's own rendering.
+     */
+    public function testPrintsCorroborationContextForAnInsufficientDataSignal(): void
+    {
+        $snapshot = new DiagnosticsSnapshot(
+            reachable: true,
+            unreachableError: null,
+            keyValid: true,
+            organizationPaused: false,
+            lastSuccessfulSubmissionAt: null,
+            bufferedReportCount: 0,
+            droppedEventCountLast24Hours: 0,
+            cronHealth: new SignalSnapshot('cron_health', SignalStatus::Normal, 12),
+            storeViews: [
+                new StoreViewSnapshot(1, 'default', [
+                    new SignalSnapshot(
+                        category: 'checkout',
+                        status: SignalStatus::InsufficientData,
+                        sequenceNumber: 1,
+                        reason: ReportReason::Transition,
+                        corroboratingCategory: 'basket_quote',
+                        corroboratingStatus: SignalStatus::Normal,
+                    ),
+                ]),
+            ],
+            recentSubmissionOutcomes: [],
+            environment: $this->emptyEnvironmentState(),
+            connectorVersion: $this->uncheckedConnectorVersionState(),
+        );
+
+        $tester = new CommandTester($this->command(snapshot: $snapshot));
+        $tester->execute([]);
+
+        self::assertStringContainsString('Cart activity is normal this period', $tester->getDisplay());
+    }
+
     private function command(
         ?Config $config = null,
         ?DiagnosticsSnapshot $snapshot = null,
@@ -451,6 +491,7 @@ class StatusCommandTest extends TestCase
             $config,
             $provider,
             new SeedCoverageLabel(),
+            new CorroborationLabel(),
             $queueStateObserver,
             $watchedJobResolver ?? $this->createStub(WatchedJobResolver::class),
             $watchedSetEvaluator ?? $this->createStub(WatchedSetEvaluator::class)

@@ -12,6 +12,7 @@ use Magento\Backend\Block\Template;
 use Magento\Backend\Block\Template\Context;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\Diagnostics\CorroborationLabel;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
 use Watchtower\Connector\Model\Diagnostics\SignalSnapshot;
@@ -37,12 +38,14 @@ class Overview extends Template
      * @param Context $context
      * @param DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider
      * @param SeedCoverageLabel $seedCoverageLabel
+     * @param CorroborationLabel $corroborationLabel
      * @param array $data
      */
     public function __construct(
         Context $context,
         private readonly DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider,
         private readonly SeedCoverageLabel $seedCoverageLabel,
+        private readonly CorroborationLabel $corroborationLabel,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -167,6 +170,20 @@ class Overview extends Template
         }
 
         return $this->seedCoverageLabel->describe($signal->seedCoverage);
+    }
+
+    /**
+     * Extra context for a signal currently reporting "Warming up" because its
+     * own volume is too thin to score: whether its mapped corroborating
+     * category (see FunnelCorroboration) shows real activity in the same
+     * window. Empty when not applicable -- see CorroborationLabel::describe().
+     *
+     * @param SignalSnapshot $signal
+     * @return string
+     */
+    public function corroborationLabel(SignalSnapshot $signal): string
+    {
+        return $this->corroborationLabel->describe($signal);
     }
 
     /**

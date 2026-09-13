@@ -20,6 +20,7 @@ use Watchtower\Connector\Model\IntegrationHealth\WatchedIntegrationRepository;
 use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepository;
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
+use Watchtower\Connector\Model\RateSignal\FunnelCorroboration;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
 use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
 use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
@@ -51,6 +52,7 @@ class DiagnosticsSnapshotProvider
      * @param DispersionStateRepository $dispersionStateRepository
      * @param DispersionEvaluator $dispersionEvaluator read-only detection-latency estimate only --
      *     never invoke evaluate() from here, it mutates confirmed/pending state as a side effect
+     * @param FunnelCorroboration $funnelCorroboration
      * @param SeedCoverageRepository $seedCoverageRepository read-only lookup of the last persisted
      *     seed outcome -- never invoke HistorySeeder::seed() from here, it writes rollup rows
      * @param IntegrationHealthStateRepository $integrationHealthStateRepository
@@ -68,6 +70,7 @@ class DiagnosticsSnapshotProvider
         private readonly HealthStateRepository $healthStateRepository,
         private readonly DispersionStateRepository $dispersionStateRepository,
         private readonly DispersionEvaluator $dispersionEvaluator,
+        private readonly FunnelCorroboration $funnelCorroboration,
         private readonly SeedCoverageRepository $seedCoverageRepository,
         private readonly IntegrationHealthStateRepository $integrationHealthStateRepository,
         private readonly WatchedIntegrationRepository $watchedIntegrationRepository,
@@ -162,8 +165,19 @@ class DiagnosticsSnapshotProvider
             $storeViewId = (int) $store->getId();
             $signals = [];
 
+            // Read every category's state up front so a later category
+            // (checkout) can be corroborated against an earlier one
+            // (basket_quote) already read this same pass, per
+            // FunnelCorroboration -- one query per category either way.
+            $states = [];
             foreach (self::CATEGORIES as $category) {
-                $state = $this->dispersionStateRepository->get($storeViewId, $category);
+                $states[$category] = $this->dispersionStateRepository->get($storeViewId, $category);
+            }
+
+            foreach (self::CATEGORIES as $category) {
+                $state = $states[$category];
+                $corroboratingCategory = $this->funnelCorroboration->corroboratingCategoryFor($category);
+
                 $signals[] = new SignalSnapshot(
                     category: $category,
                     status: $state->confirmedStatus,
@@ -176,6 +190,10 @@ class DiagnosticsSnapshotProvider
                     ),
                     ensembleDrivingChecks: $state->ensembleDrivingChecks,
                     seedCoverage: $this->seedCoverageRepository->get($storeViewId, $category),
+                    corroboratingCategory: $corroboratingCategory,
+                    corroboratingStatus: $corroboratingCategory !== null
+                        ? $states[$corroboratingCategory]->confirmedStatus
+                        : null,
                 );
             }
 

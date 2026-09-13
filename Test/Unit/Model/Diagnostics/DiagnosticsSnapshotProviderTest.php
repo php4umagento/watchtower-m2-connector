@@ -33,6 +33,7 @@ use Watchtower\Connector\Model\IntegrationHealth\IntegrationHealthStateRepositor
 use Watchtower\Connector\Model\RateSignal\DispersionEvaluator;
 use Watchtower\Connector\Model\RateSignal\DispersionState;
 use Watchtower\Connector\Model\RateSignal\DispersionStateRepository;
+use Watchtower\Connector\Model\RateSignal\FunnelCorroboration;
 use Watchtower\Connector\Model\Seed\HistorySeeder;
 use Watchtower\Connector\Model\Seed\SeedCoverageRepository;
 use Watchtower\Connector\Model\Seed\SeedCoverageResult;
@@ -226,6 +227,60 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         self::assertSame(19.0, $byCategory[HistorySeeder::CATEGORY_BASKET_QUOTE]);
         self::assertNull($byCategory[HistorySeeder::CATEGORY_CHECKOUT]);
         self::assertNull($byCategory[HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT]);
+    }
+
+    /**
+     * checkout is the only category FunnelCorroboration maps to a
+     * corroborating category (basket_quote), so its SignalSnapshot carries
+     * basket_quote's own already-read confirmed status alongside it, while
+     * basket_quote's own snapshot -- having no corroborating category of its
+     * own -- carries neither field.
+     */
+    public function testCheckoutSignalCarriesBasketQuotesStatusAsCorroboration(): void
+    {
+        $storeManager = $this->createStub(StoreManagerInterface::class);
+        $storeManager->method('getStores')->willReturn([$this->activeStore('default')]);
+
+        $statusByCategory = [
+            HistorySeeder::CATEGORY_BASKET_QUOTE => SignalStatus::Normal,
+            HistorySeeder::CATEGORY_CHECKOUT => SignalStatus::InsufficientData,
+            HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT => SignalStatus::InsufficientData,
+        ];
+
+        $dispersionStateRepository = $this->createStub(DispersionStateRepository::class);
+        $dispersionStateRepository->method('get')->willReturnCallback(
+            fn (int $storeViewId, string $category) => new DispersionState(
+                storeViewId: $storeViewId,
+                category: $category,
+                pendingStatus: null,
+                confirmedStatus: $statusByCategory[$category],
+                sequenceNumber: 1,
+            )
+        );
+
+        $watchedIntegrationRepository = $this->createStub(WatchedIntegrationRepository::class);
+        $watchedIntegrationRepository->method('hasAnyWatched')->willReturn(false);
+
+        $snapshot = $this->provider(
+            storeManager: $storeManager,
+            dispersionStateRepository: $dispersionStateRepository,
+            watchedIntegrationRepository: $watchedIntegrationRepository,
+        )->snapshot($this->now());
+
+        $byCategory = [];
+        foreach ($snapshot->storeViews[0]->signals as $signal) {
+            $byCategory[$signal->category] = $signal;
+        }
+
+        self::assertSame(
+            HistorySeeder::CATEGORY_BASKET_QUOTE,
+            $byCategory[HistorySeeder::CATEGORY_CHECKOUT]->corroboratingCategory
+        );
+        self::assertSame(SignalStatus::Normal, $byCategory[HistorySeeder::CATEGORY_CHECKOUT]->corroboratingStatus);
+
+        self::assertNull($byCategory[HistorySeeder::CATEGORY_BASKET_QUOTE]->corroboratingCategory);
+        self::assertNull($byCategory[HistorySeeder::CATEGORY_BASKET_QUOTE]->corroboratingStatus);
+        self::assertNull($byCategory[HistorySeeder::CATEGORY_CUSTOMER_ACCOUNT]->corroboratingCategory);
     }
 
     /**
@@ -472,6 +527,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         ?HealthStateRepository $healthStateRepository = null,
         ?DispersionStateRepository $dispersionStateRepository = null,
         ?DispersionEvaluator $dispersionEvaluator = null,
+        ?FunnelCorroboration $funnelCorroboration = null,
         ?SeedCoverageRepository $seedCoverageRepository = null,
         ?IntegrationHealthStateRepository $integrationHealthStateRepository = null,
         ?WatchedIntegrationRepository $watchedIntegrationRepository = null,
@@ -520,6 +576,10 @@ class DiagnosticsSnapshotProviderTest extends TestCase
         if ($dispersionEvaluator === null) {
             $dispersionEvaluator = $this->createStub(DispersionEvaluator::class);
             $dispersionEvaluator->method('estimatedDetectionLatencyHours')->willReturn(null);
+        }
+
+        if ($funnelCorroboration === null) {
+            $funnelCorroboration = new FunnelCorroboration();
         }
 
         if ($seedCoverageRepository === null) {
@@ -577,6 +637,7 @@ class DiagnosticsSnapshotProviderTest extends TestCase
             $healthStateRepository,
             $dispersionStateRepository,
             $dispersionEvaluator,
+            $funnelCorroboration,
             $seedCoverageRepository,
             $integrationHealthStateRepository,
             $watchedIntegrationRepository,

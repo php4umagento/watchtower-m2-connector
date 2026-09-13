@@ -12,6 +12,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Watchtower\Connector\Model\Config;
+use Watchtower\Connector\Model\Diagnostics\CorroborationLabel;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
 use Watchtower\Connector\Model\IntegrationHealth\WatchedJobResolver;
@@ -35,6 +36,7 @@ class StatusCommand extends Command
      * @param Config $config
      * @param DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider
      * @param SeedCoverageLabel $seedCoverageLabel
+     * @param CorroborationLabel $corroborationLabel
      * @param QueueStateObserver $queueStateObserver
      * @param WatchedJobResolver $watchedJobResolver
      * @param WatchedSetEvaluator $watchedSetEvaluator
@@ -44,6 +46,7 @@ class StatusCommand extends Command
         private readonly Config $config,
         private readonly DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider,
         private readonly SeedCoverageLabel $seedCoverageLabel,
+        private readonly CorroborationLabel $corroborationLabel,
         private readonly QueueStateObserver $queueStateObserver,
         private readonly WatchedJobResolver $watchedJobResolver,
         private readonly WatchedSetEvaluator $watchedSetEvaluator,
@@ -255,6 +258,12 @@ class StatusCommand extends Command
 
                 if ($signal->seedCoverage !== null) {
                     $output->writeln('    '.$this->seedCoverageLabel->describe($signal->seedCoverage));
+                }
+
+                $corroboration = $this->corroborationLabel->describe($signal);
+
+                if ($corroboration !== '') {
+                    $output->writeln('    '.$corroboration);
                 }
             }
         }
