@@ -5,6 +5,14 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.32.0] - 2026-09-18
+
+Adds `application_errors`, a new signal that watches Magento's own exception
+log for a rising rate of caught application errors, catching a struggling
+module before it shows up in checkout, indexing, or any other existing
+signal. Works on Magento 2.4.7 through 2.4.9. Run `setup:upgrade` after
+updating; it adds a new table for this signal's baseline.
+
 ## [1.31.0] - 2026-09-13
 
 When `checkout` reports "Warming up" from low volume, the Diagnostics page
