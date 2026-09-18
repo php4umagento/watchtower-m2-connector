@@ -21,6 +21,7 @@ use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
 use Watchtower\Connector\Model\Api\MetricsSubmissionService;
 use Watchtower\Connector\Model\Api\ReportReason;
 use Watchtower\Connector\Model\Api\SignalStatus;
+use Watchtower\Connector\Model\ApplicationErrors\Evaluator as ApplicationErrorsEvaluator;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\Config;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
@@ -263,6 +264,7 @@ class ReportingCyclePerfTest extends TestCase
             $this->createStub(QueueHealthEvaluator::class),
             $this->createStub(WatchedJobResolver::class),
             $this->createStub(WatchedSetEvaluator::class),
+            $this->createStub(ApplicationErrorsEvaluator::class),
         );
     }
 

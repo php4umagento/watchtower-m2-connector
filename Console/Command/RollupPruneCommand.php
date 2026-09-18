@@ -11,16 +11,19 @@ namespace Watchtower\Connector\Console\Command;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use Watchtower\Connector\Model\Rollup\InstallRollupRepository;
 use Watchtower\Connector\Model\Rollup\RollupRepository;
 
 class RollupPruneCommand extends Command
 {
     /**
      * @param RollupRepository $rollupRepository
+     * @param InstallRollupRepository $installRollupRepository
      * @param string|null $name
      */
     public function __construct(
         private readonly RollupRepository $rollupRepository,
+        private readonly InstallRollupRepository $installRollupRepository,
         ?string $name = null
     ) {
         parent::__construct($name);
@@ -52,11 +55,14 @@ class RollupPruneCommand extends Command
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $result = $this->rollupRepository->rollupAndPrune(new \DateTimeImmutable());
+        $now = new \DateTimeImmutable();
+        $result = $this->rollupRepository->rollupAndPrune($now);
+        $installRowsPruned = $this->installRollupRepository->prune($now);
 
         $output->writeln(sprintf('<info>Rolled up day groups: %d</info>', $result->rolledDayGroups));
         $output->writeln(sprintf('Hourly rows pruned: %d', $result->hourlyRowsPruned));
         $output->writeln(sprintf('Daily rows pruned (exceeded retention): %d', $result->dailyRowsPruned));
+        $output->writeln(sprintf('Install-scoped rows pruned (exceeded retention): %d', $installRowsPruned));
 
         return Command::SUCCESS;
     }

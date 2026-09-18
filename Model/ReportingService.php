@@ -14,6 +14,7 @@ use Watchtower\Connector\Model\Api\MetricReport;
 use Watchtower\Connector\Model\Api\MetricsSubmissionResult;
 use Watchtower\Connector\Model\Api\MetricsSubmissionService;
 use Watchtower\Connector\Model\AdminAuthFailure\Evaluator as AdminAuthFailureEvaluator;
+use Watchtower\Connector\Model\ApplicationErrors\Evaluator as ApplicationErrorsEvaluator;
 use Watchtower\Connector\Model\Buffer\ReportBufferRepository;
 use Watchtower\Connector\Model\CheckoutFailure\Evaluator as CheckoutFailureEvaluator;
 use Watchtower\Connector\Model\CronHealth\Evaluator;
@@ -38,21 +39,23 @@ use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
 /**
  * Shared "evaluate then submit" logic behind both watchtower:report and the
  * scheduled cron job. Evaluates the install-scoped signals (cron_health,
- * admin_auth_failure, indexer_health, queue_health -- no store view) plus the
- * three rate-based categories, checkout_failure, and integration_health for
- * every live store view, then submits them together wherever possible. "Live"
- * mirrors StoreViewSyncService's is_active filter.
+ * admin_auth_failure, indexer_health, queue_health, application_errors --
+ * no store view) plus the three rate-based categories, checkout_failure,
+ * and integration_health for every live store view, then submits them
+ * together wherever possible. "Live" mirrors StoreViewSyncService's
+ * is_active filter.
  *
  * $freshReports is always [cronHealth, adminAuthFailure, indexerHealth,
- * queueHealth, ...storeViewReports]. Each install-scoped report is captured
- * into its own variable rather than derived positionally from that array, so
- * adding one cannot silently corrupt the store-view slice.
+ * queueHealth, applicationErrors, ...storeViewReports]. Each install-scoped
+ * report is captured into its own variable rather than derived positionally
+ * from that array, so adding one cannot silently corrupt the store-view
+ * slice.
  *
  * It is not free, though, and the earlier version of this note overstated it:
- * adding indexer_health, and then queue_health, each still required naming the
- * new signal in both 'installReports' returns below. Named capture makes the
- * addition a compile-visible edit rather than an off-by-one; it does not make
- * it a no-op.
+ * adding indexer_health, then queue_health, then application_errors, each
+ * still required naming the new signal in both 'installReports' returns
+ * below. Named capture makes the addition a compile-visible edit rather than
+ * an off-by-one; it does not make it a no-op.
  *
  * The platform rejects a report whose sequence_number is at or below the
  * highest already accepted for that event type, so a submission may never
@@ -99,6 +102,7 @@ class ReportingService
      * @param QueueHealthEvaluator $queueHealthEvaluator
      * @param WatchedJobResolver $watchedJobResolver expands the merchant's watched set to job codes
      * @param WatchedSetEvaluator $watchedSetEvaluator rolls that set up to one status per store view
+     * @param ApplicationErrorsEvaluator $applicationErrorsEvaluator
      */
     public function __construct(
         private readonly Config $config,
@@ -127,6 +131,8 @@ class ReportingService
         private readonly QueueHealthEvaluator $queueHealthEvaluator,
         private readonly WatchedJobResolver $watchedJobResolver,
         private readonly WatchedSetEvaluator $watchedSetEvaluator,
+        // Appended for the same reason as IndexerHealthEvaluator/QueueHealthEvaluator above.
+        private readonly ApplicationErrorsEvaluator $applicationErrorsEvaluator,
     ) {
     }
 
@@ -188,10 +194,13 @@ class ReportingService
         // "storeViewReports is everything after the install-scoped ones"
         // stopped being expressible as a single array_slice offset the moment a
         // second one existed, and there are three now.
+        $lastCompleteHourStart = $this->lastCompleteHourStart($now);
+
         $cronHealthReport = $this->cronHealthEvaluator->evaluate($now);
-        $adminAuthFailureReport = $this->adminAuthFailureEvaluator->evaluate($this->lastCompleteHourStart($now), $now);
+        $adminAuthFailureReport = $this->adminAuthFailureEvaluator->evaluate($lastCompleteHourStart, $now);
         $indexerHealthReport = $this->indexerHealthEvaluator->evaluate($now);
         $queueHealthReport = $this->queueHealthEvaluator->evaluate($now);
+        $applicationErrorsReport = $this->applicationErrorsEvaluator->evaluate($lastCompleteHourStart, $now);
         $storeViewReports = $this->liveStoreViewReports($now);
 
         $freshReports = [
@@ -199,6 +208,7 @@ class ReportingService
             $adminAuthFailureReport,
             $indexerHealthReport,
             $queueHealthReport,
+            $applicationErrorsReport,
             ...$storeViewReports,
         ];
 
@@ -229,6 +239,7 @@ class ReportingService
                     $adminAuthFailureReport,
                     $indexerHealthReport,
                     $queueHealthReport,
+                    $applicationErrorsReport,
                 ],
                 'storeViewReports' => $storeViewReports,
                 'result' => null,
@@ -310,7 +321,13 @@ class ReportingService
         return [
             'ran' => true,
             'report' => $freshReports[0],
-            'installReports' => [$cronHealthReport, $adminAuthFailureReport, $indexerHealthReport, $queueHealthReport],
+            'installReports' => [
+                $cronHealthReport,
+                $adminAuthFailureReport,
+                $indexerHealthReport,
+                $queueHealthReport,
+                $applicationErrorsReport,
+            ],
             'storeViewReports' => $storeViewReports,
             'result' => $lastResult,
             'includedBufferedCount' => $totalIncludedBuffered,

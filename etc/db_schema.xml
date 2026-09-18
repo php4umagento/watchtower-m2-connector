@@ -251,6 +251,33 @@
             <column name="hour_bucket"/>
         </constraint>
     </table>
+    <table name="watchtower_install_rollup_hourly" resource="default" engine="innodb"
+           comment="Install-scoped hourly counts retained ~90 days, e.g. application_errors.">
+        <!--
+            application_errors (docs/connector-error-log-signal-prd.md) is the
+            first install-scoped signal that also needs a rate baseline:
+            every prior install-scoped signal (cron_health, admin_auth_failure,
+            indexer_health, queue_health) is a state/threshold check with no
+            history to keep, so watchtower_install_event_counter's ~90 day
+            retention was never a problem. A dispersion baseline needs
+            multiple weeks of same-hour-of-week history, the same reason
+            watchtower_rollup_hourly exists as a separate, longer-retention
+            table from watchtower_event_counter for store-view-scoped
+            signals. This table is that same split, install-scoped.
+        -->
+        <column xsi:type="varchar" name="event_name" nullable="false" length="64"
+                comment="Signal name, e.g. application_error_logged"/>
+        <column xsi:type="datetime" name="hour_bucket" nullable="false"
+                comment="UTC top-of-hour instant this row counts"/>
+        <column xsi:type="int" name="count" unsigned="true" nullable="false" default="0"
+                comment="Event count observed in this hour"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false" default="CURRENT_TIMESTAMP"
+                comment="Last written"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="event_name"/>
+            <column name="hour_bucket"/>
+        </constraint>
+    </table>
     <table name="watchtower_integration_health_event" resource="default" engine="innodb"
            comment="Local snapshot of watchtower_integration_health event dispatches (source #3).">
         <column xsi:type="int" name="id" unsigned="true" nullable="false" identity="true"

@@ -269,5 +269,27 @@
         "constraint": {
             "PRIMARY": true
         }
+    },
+    "watchtower_install_event_counter": {
+        "column": {
+            "event_name": true,
+            "hour_bucket": true,
+            "count": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
+    },
+    "watchtower_install_rollup_hourly": {
+        "column": {
+            "event_name": true,
+            "hour_bucket": true,
+            "count": true,
+            "updated_at": true
+        },
+        "constraint": {
+            "PRIMARY": true
+        }
     }
 }

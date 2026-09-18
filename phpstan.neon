@@ -68,3 +68,48 @@ parameters:
         -
             message: '#Else branch is unreachable because ternary operator condition is always true#'
             path: Model/IntegrationHealth/IntegrationHealthEventRepository.php
+
+        # Same class_alias() gate limitation as the excludePaths entries
+        # below, here as Evaluator.php reading Handler::EVENT_NAME (the
+        # constant is real at runtime -- both concrete handlers keep it
+        # identical by hand, see MonologThreeHandler/MonologTwoHandler's own
+        # docblocks -- PHPStan just cannot resolve the aliased class to see it).
+        -
+            message: '#Access to constant EVENT_NAME on an unknown class Watchtower\\Connector\\Model\\ApplicationErrors\\Handler#'
+            path: Model/ApplicationErrors/Evaluator.php
+
+        # SHADOW_MODE_BURST_ALERTING is a deliberate feature flag, literally
+        # false until real install data justifies BURST_THRESHOLD_N (PRD Q1)
+        # -- see Evaluator's own docblock. PHPStan correctly notices the
+        # constant makes `self::SHADOW_MODE_BURST_ALERTING && $wouldFire`
+        # always false today; that is the intended behavior, not dead code,
+        # and flipping the constant later is meant to make this warning (and
+        # the behavior) go away in one line.
+        -
+            message: '#Left side of && is always false#'
+            path: Model/ApplicationErrors/Evaluator.php
+
+    # application_errors ships two concrete Monolog handler classes,
+    # MonologThreeHandler.php (Monolog 3, LogRecord objects; 2.4.8+) and
+    # MonologTwoHandler.php (Monolog 2, array records; 2.4.7) -- see
+    # Model/ApplicationErrors/Handler.php's own docblock for why one class
+    # cannot implement HandlerInterface for both. Whichever Monolog major is
+    # actually installed where PHPStan runs is the only one whose
+    # HandlerInterface it can resolve, so it always reports the OTHER
+    # handler's method signatures as incompatible with that interface --
+    # PHPStan treats this specific class of error (interface contravariance)
+    # as unsuppressible via ignoreErrors ("cannot be ignored, use
+    # excludePaths instead"), so both concrete handlers are excluded from
+    # analysis entirely rather than fought file-by-file. Handler.php itself
+    # is excluded too: it is a runtime class_alias() gate, not a real class
+    # body, and PHPStan cannot resolve a class_alias target statically.
+    # HandlerTest.php/MonologThreeHandlerTest.php/MonologTwoHandlerTest.php/
+    # the two SourceSafetyTest files, and HandlerAliasTest.php are NOT
+    # excluded -- they have no cross-version type conflict (the Monolog-2
+    # test class type-hints its own handler only inside methods that are
+    # skipped, never statically declared against the wrong interface) and
+    # keep full static analysis coverage.
+    excludePaths:
+        - Model/ApplicationErrors/Handler.php
+        - Model/ApplicationErrors/MonologThreeHandler.php
+        - Model/ApplicationErrors/MonologTwoHandler.php

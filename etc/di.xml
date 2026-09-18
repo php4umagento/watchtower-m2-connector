@@ -30,4 +30,47 @@
             </argument>
         </arguments>
     </type>
+    <!--
+        application_errors (docs/connector-error-log-signal-prd.md): the only
+        signal in this module registered onto Magento's own Monolog handler
+        stack rather than as an events.xml observer.
+
+        The three core items (system/debug/syslog) are redeclared here
+        alongside watchtowerApplicationErrors rather than relying on Magento
+        to merge this module's "handlers" array with app/etc/di.xml's own
+        declaration for the same type+argument by item name. Verified live
+        (not assumed) that it does NOT merge that way: app/etc/di.xml is
+        Magento's primary bootstrap config, a different layer from the
+        regular per-module di.xml merge cascade, and a module-level
+        <argument name="handlers"> for this type REPLACES app/etc/di.xml's
+        array wholesale rather than unioning with it: confirmed by
+        inspecting generated/metadata/*.php after setup:di:compile with only
+        the watchtowerApplicationErrors item present, and by a live check
+        (Monolog\Logger::getHandlers()) showing exactly one handler instead
+        of four. An earlier version of this file declared only the new item,
+        which silently disabled exception.log/system.log/debug.log for the
+        whole install; caught before shipping only because this was
+        verified end-to-end rather than assumed correct after the tests
+        passed.
+
+        Tradeoff, stated plainly: this now has to stay in sync with
+        app/etc/di.xml's own "system"/"debug"/"syslog" declaration by hand.
+        If a future Magento version changes that set, this module's copy
+        goes stale until someone notices and updates it here too. Re-check
+        this against app/etc/di.xml whenever bumping the module's supported
+        Magento version range, the same discipline Q5 in the PRD applies to
+        the Handler\Debug/System evidence itself.
+    -->
+    <type name="Magento\Framework\Logger\Monolog">
+        <arguments>
+            <argument name="handlers" xsi:type="array">
+                <item name="system" xsi:type="object">Magento\Framework\Logger\Handler\System</item>
+                <item name="debug" xsi:type="object">Magento\Framework\Logger\Handler\Debug</item>
+                <item name="syslog" xsi:type="object">Magento\Framework\Logger\Handler\Syslog</item>
+                <item name="watchtowerApplicationErrors" xsi:type="object">
+                    Watchtower\Connector\Model\ApplicationErrors\Handler
+                </item>
+            </argument>
+        </arguments>
+    </type>
 </config>
