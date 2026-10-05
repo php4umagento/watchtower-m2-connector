@@ -15,6 +15,7 @@ use Watchtower\Connector\Model\Api\SignalStatus;
 use Watchtower\Connector\Model\Diagnostics\CorroborationLabel;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshot;
 use Watchtower\Connector\Model\Diagnostics\DiagnosticsSnapshotProvider;
+use Watchtower\Connector\Model\Diagnostics\InsufficientDataLabel;
 use Watchtower\Connector\Model\Diagnostics\SignalSnapshot;
 use Watchtower\Connector\Model\Diagnostics\StoreViewSnapshot;
 use Watchtower\Connector\Model\Diagnostics\SubmissionOutcome;
@@ -39,6 +40,7 @@ class Overview extends Template
      * @param DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider
      * @param SeedCoverageLabel $seedCoverageLabel
      * @param CorroborationLabel $corroborationLabel
+     * @param InsufficientDataLabel $insufficientDataLabel
      * @param array $data
      */
     public function __construct(
@@ -46,6 +48,7 @@ class Overview extends Template
         private readonly DiagnosticsSnapshotProvider $diagnosticsSnapshotProvider,
         private readonly SeedCoverageLabel $seedCoverageLabel,
         private readonly CorroborationLabel $corroborationLabel,
+        private readonly InsufficientDataLabel $insufficientDataLabel,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -101,7 +104,7 @@ class Overview extends Template
             SignalStatus::SevereDrop => 'Severe drop',
             SignalStatus::MildSpike => 'Mild spike',
             SignalStatus::SevereSpike => 'Severe spike',
-            SignalStatus::InsufficientData => 'Warming up',
+            SignalStatus::InsufficientData => $this->insufficientDataLabel->label($signal),
         };
     }
 
@@ -222,7 +225,7 @@ class Overview extends Template
     public function storeViewWarmingUp(StoreViewSnapshot $storeView): bool
     {
         foreach ($storeView->signals as $signal) {
-            if ($signal->status === SignalStatus::InsufficientData) {
+            if ($this->insufficientDataLabel->isWarmingUp($signal)) {
                 return true;
             }
         }
