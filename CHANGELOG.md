@@ -5,6 +5,10 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.32.1] - 2026-10-05
+
+Diagnostics no longer says "Warming up" for a signal that already has a baseline. Those now read "Too quiet to judge", and the store view's "Warming up" note only appears while something is genuinely still learning.
+
 ## [1.32.0] - 2026-09-18
 
 Adds `application_errors`, a new signal that watches Magento's own exception
