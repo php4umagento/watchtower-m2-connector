@@ -7,13 +7,7 @@ field — Composer's VCS-repository support resolves it from the tag).
 
 ## [1.33.0] - 2026-10-11
 
-Fewer false alerts and faster detection for the rate signals (`checkout`,
-`basket_quote`, `customer_account`). A busy store no longer gets alerts for
-ordinary hour-to-hour fluctuation, a sustained drop or surge that no single hour
-proves (for example half the usual traffic for several hours) is now caught, and
-a known seasonal peak such as Black Friday no longer reads as a spike. No wire
-change, no `setup:upgrade` needed. `ruleset_version` for these signals is now
-`1.6.0`. Measured with the new replay tests under `Test/Unit/Replay`.
+Fewer false alerts and faster detection for `checkout`, `basket_quote` and `customer_account`: ordinary hour-to-hour fluctuation on busy stores no longer alerts, a sustained drop or surge (such as half the usual traffic for several hours) is caught, and a known seasonal peak like Black Friday no longer reads as a spike. No wire change and no `setup:upgrade` needed.
 
 ## [1.32.1] - 2026-10-05
 
