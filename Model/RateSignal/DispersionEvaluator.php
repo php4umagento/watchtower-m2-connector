@@ -33,7 +33,7 @@ use Watchtower\Connector\Model\Seasonal\RetailCalendar;
 class DispersionEvaluator
 {
     /** Bumped whenever baseline logic or thresholds change, distinct from CronHealth\Evaluator's own version. */
-    public const RULESET_VERSION = '1.5.0';
+    public const RULESET_VERSION = '1.6.0';
 
     /**
      * Default rolling baseline window for Check A. Public because
@@ -88,6 +88,27 @@ class DispersionEvaluator
      * fluctuation as a maximal-confidence anomaly.
      */
     private const MAD_CONTINUITY_FLOOR = 0.5;
+
+    /** Event counts cannot be less dispersed than Poisson noise, whose MAD is about 0.6745 * sqrt(mean). */
+    private const POISSON_MAD_FACTOR = 0.6745;
+
+    /** A seasonal index this far from 1.0 (either way) makes Check B the sole judge for that hour. */
+    private const SEASONAL_DECISIVE_DEVIATION = 0.5;
+
+    /** Trailing window lengths, in hours, the sustained-shift check sums over. */
+    private const SUSTAINED_WINDOWS = [3, 6, 12];
+
+    /** The check ignores windows whose expected total is below this: too few events to judge a ratio. */
+    private const SUSTAINED_MIN_EXPECTED = 30;
+
+    /** Poisson standard deviations (mild, severe) a window total must clear, on top of the relative allowance. */
+    private const SUSTAINED_SIGMAS = [4.0, 7.0];
+
+    /** Day-to-day swing (mild, severe) as a fraction of expected, which hours within one day share. */
+    private const SUSTAINED_RELATIVE_ALLOWANCE = [0.4, 0.55];
+
+    /** Below this median Poisson is too skewed for a sqrt-based floor to be right, so it does not apply. */
+    private const POISSON_FLOOR_MIN_MEDIAN = 10;
 
     /** Below this measured rate, rawStatus() uses the inter-arrival check instead of median/MAD. */
     private const VOLUME_FLOOR = 5;
@@ -262,6 +283,26 @@ class DispersionEvaluator
         int $observedCount,
         \DateTimeImmutable $evaluatedHour
     ): array {
+        [$status, $checks] = $this->hourlyRawStatus($storeViewId, $category, $observedCount, $evaluatedHour);
+
+        if ($status !== SignalStatus::Normal) {
+            return [$status, $checks];
+        }
+
+        $sustained = $this->sustainedShiftStatus($storeViewId, $category, $evaluatedHour);
+
+        return $sustained === SignalStatus::Normal ? [$status, $checks] : [$sustained, ['sustained']];
+    }
+
+    /**
+     * @return array{0: SignalStatus, 1: string[]}
+     */
+    private function hourlyRawStatus(
+        int $storeViewId,
+        string $category,
+        int $observedCount,
+        \DateTimeImmutable $evaluatedHour
+    ): array {
         $samples = $this->historicalSamples($storeViewId, $category, $evaluatedHour);
 
         if (count($samples) >= self::MIN_HISTORICAL_SAMPLES) {
@@ -269,7 +310,11 @@ class DispersionEvaluator
             $median = $this->median($values);
 
             if ($median >= self::VOLUME_FLOOR) {
-                $mad = max($this->medianAbsoluteDeviation($values, $median), self::MAD_CONTINUITY_FLOOR);
+                $mad = max(
+                    $this->medianAbsoluteDeviation($values, $median),
+                    self::MAD_CONTINUITY_FLOOR,
+                    $median >= self::POISSON_FLOOR_MIN_MEDIAN ? self::POISSON_MAD_FACTOR * sqrt($median) : 0.0
+                );
 
                 return $this->ensembleClassify($storeViewId, $category, $evaluatedHour, $observedCount, $median, $mad);
             }
@@ -277,6 +322,144 @@ class DispersionEvaluator
 
         // Too little history, or this signal's typical rate is below the volume floor: use the inter-arrival path.
         return [$this->interArrivalRawStatus($storeViewId, $category, $evaluatedHour, $observedCount), []];
+    }
+
+    /**
+     * Catches a sustained shift that no single hour proves: sums the last few
+     * hours against the sum of their own bucket medians. Allowance for the
+     * total is Poisson noise plus a relative day-level swing, since hours
+     * within one day move together and Poisson alone would call that a fault.
+     *
+     * @param int $storeViewId
+     * @param string $category
+     * @param \DateTimeImmutable $evaluatedHour
+     * @return SignalStatus Normal when nothing sustained is found or there is too little to judge
+     */
+    private function sustainedShiftStatus(
+        int $storeViewId,
+        string $category,
+        \DateTimeImmutable $evaluatedHour
+    ): SignalStatus {
+        $series = $this->rollupRepository->allHourlyCountsInWindow(
+            $storeViewId,
+            $category,
+            self::BASELINE_WEEKS,
+            $evaluatedHour
+        );
+
+        if ($this->estimatedDailyVolume($series, $evaluatedHour) < self::MIN_VALIDATED_DAILY_VOLUME) {
+            return SignalStatus::Normal;
+        }
+
+        $observedByHour = [];
+
+        foreach ($series as $sample) {
+            $observedByHour[$sample->bucket->getTimestamp()] = $sample->count;
+        }
+
+        $seasonalIndex = $this->seasonalIndex($storeViewId, $category, $evaluatedHour);
+        $observedTotal = 0;
+        $expectedTotal = 0.0;
+        $worst = SignalStatus::Normal;
+
+        for ($back = 0; $back < max(self::SUSTAINED_WINDOWS); $back++) {
+            $hour = $evaluatedHour->modify(sprintf('-%d hours', $back));
+            $expected = $this->bucketMedian($storeViewId, $category, $hour);
+
+            if ($expected === null || !isset($observedByHour[$hour->getTimestamp()])) {
+                return $worst;
+            }
+
+            $observedTotal += $observedByHour[$hour->getTimestamp()];
+            $expectedTotal += $expected * $seasonalIndex;
+
+            if (!in_array($back + 1, self::SUSTAINED_WINDOWS, true) || $expectedTotal < self::SUSTAINED_MIN_EXPECTED) {
+                continue;
+            }
+
+            $worst = $this->moreSevere($worst, $this->classifyTotal($observedTotal, $expectedTotal));
+        }
+
+        return $worst;
+    }
+
+    /**
+     * Check B's index for the evaluated hour's period, or 1.0 while it abstains.
+     *
+     * @param int $storeViewId
+     * @param string $category
+     * @param \DateTimeImmutable $evaluatedHour
+     * @return float
+     */
+    private function seasonalIndex(int $storeViewId, string $category, \DateTimeImmutable $evaluatedHour): float
+    {
+        // The index is a ratio of daily averages, so any positive median yields it: use 1.0.
+        $index = $this->seasonalIndexEvaluator->adjustedExpectedValue($storeViewId, $category, $evaluatedHour, 1.0);
+
+        return $index ?? 1.0;
+    }
+
+    /**
+     * @param int $observed
+     * @param float $expected
+     * @return SignalStatus
+     */
+    private function classifyTotal(int $observed, float $expected): SignalStatus
+    {
+        $deviation = $observed - $expected;
+
+        foreach ([1, 0] as $level) {
+            $allowance = $expected * sqrt(
+                self::SUSTAINED_SIGMAS[$level] ** 2 / $expected + self::SUSTAINED_RELATIVE_ALLOWANCE[$level] ** 2
+            );
+
+            if (abs($deviation) > $allowance) {
+                $severe = $level === 1;
+
+                if ($deviation < 0) {
+                    return $severe ? SignalStatus::SevereDrop : SignalStatus::MildDrop;
+                }
+
+                return $severe ? SignalStatus::SevereSpike : SignalStatus::MildSpike;
+            }
+        }
+
+        return SignalStatus::Normal;
+    }
+
+    /**
+     * @param SignalStatus $current
+     * @param SignalStatus $candidate
+     * @return SignalStatus
+     */
+    private function moreSevere(SignalStatus $current, SignalStatus $candidate): SignalStatus
+    {
+        $rank = static fn (SignalStatus $status): int => match ($status) {
+            SignalStatus::SevereDrop, SignalStatus::SevereSpike => 2,
+            SignalStatus::MildDrop, SignalStatus::MildSpike => 1,
+            default => 0,
+        };
+
+        return $rank($candidate) > $rank($current) ? $candidate : $current;
+    }
+
+    /**
+     * Median of this hour's bucket (same day of week and hour of day), excluding the hour itself.
+     *
+     * @param int $storeViewId
+     * @param string $category
+     * @param \DateTimeImmutable $hour
+     * @return float|null null when the bucket has too few samples
+     */
+    private function bucketMedian(int $storeViewId, string $category, \DateTimeImmutable $hour): ?float
+    {
+        $samples = $this->historicalSamples($storeViewId, $category, $hour);
+
+        if (count($samples) < self::MIN_HISTORICAL_SAMPLES) {
+            return null;
+        }
+
+        return $this->median(array_map(static fn (HourlyCountSample $sample): int => $sample->count, $samples));
     }
 
     /**
@@ -334,6 +517,12 @@ class DispersionEvaluator
 
         if (count($activeVotes) === 1) {
             return [$checkA, ['dispersion']];
+        }
+
+        // Checks A and C are blind to the calendar, so in a clearly seasonal period they would always
+        // outvote B with the very baseline B exists to correct. B decides alone once its index is large.
+        if (isset($activeVotes['seasonal']) && abs($seasonalExpected / $median - 1.0) >= self::SEASONAL_DECISIVE_DEVIATION) {
+            return [$activeVotes['seasonal'], ['seasonal']];
         }
 
         $voteCounts = [];
@@ -454,7 +643,12 @@ class DispersionEvaluator
         }
 
         if ($observedCount > 0) {
-            return $this->lowVolumeSpikeStatus($series, $evaluatedHour, $observedCount);
+            return $this->lowVolumeSpikeStatus(
+                $series,
+                $evaluatedHour,
+                $observedCount,
+                max(1.0, $this->seasonalIndex($storeViewId, $category, $evaluatedHour))
+            );
         }
 
         if ($this->estimatedDailyVolume($series, $evaluatedHour) < self::MIN_VALIDATED_DAILY_VOLUME) {
@@ -483,7 +677,8 @@ class DispersionEvaluator
     private function lowVolumeSpikeStatus(
         array $series,
         \DateTimeImmutable $evaluatedHour,
-        int $observedCount
+        int $observedCount,
+        float $seasonalScale = 1.0
     ): SignalStatus {
         $bucketCounts = $this->bucketCounts($series, $evaluatedHour);
 
@@ -493,8 +688,8 @@ class DispersionEvaluator
 
         $historicalMax = $historicalCounts !== [] ? max($historicalCounts) : 0;
 
-        if ($observedCount >= self::LOW_VOLUME_SPIKE_MIN_COUNT
-            && $observedCount >= $historicalMax * self::LOW_VOLUME_SEVERE_SPIKE_MULTIPLIER
+        if ($observedCount >= self::LOW_VOLUME_SPIKE_MIN_COUNT * $seasonalScale
+            && $observedCount >= $historicalMax * self::LOW_VOLUME_SEVERE_SPIKE_MULTIPLIER * $seasonalScale
         ) {
             return SignalStatus::SevereSpike;
         }

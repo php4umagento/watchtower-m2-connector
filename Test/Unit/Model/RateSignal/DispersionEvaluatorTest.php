@@ -55,9 +55,10 @@ class DispersionEvaluatorTest extends TestCase
 
     public function testValueSeveralMadsBelowMedianReportsMildDrop(): void
     {
-        // modified_z = 0.6745 * (95 - 100.5) / 1.0 = -3.71 (magnitude in [3.5, 7.0)).
+        // MAD 1.0 is floored to the Poisson MAD 0.6745 * sqrt(100.5) = 6.762:
+        // modified_z = 0.6745 * (65 - 100.5) / 6.762 = -3.54 (magnitude in [3.5, 7.0)).
         $report = $this->evaluateWithConfirmedStatus(
-            observedCount: 95,
+            observedCount: 65,
             confirmed: SignalStatus::MildDrop,
             samples: $this->baselineSamples()
         );
@@ -67,9 +68,9 @@ class DispersionEvaluatorTest extends TestCase
 
     public function testValueManyMadsBelowMedianReportsSevereDrop(): void
     {
-        // modified_z = 0.6745 * (85 - 100.5) / 1.0 = -10.45 (magnitude >= 7.0).
+        // modified_z = 0.6745 * (30 - 100.5) / 6.762 = -7.03 (magnitude >= 7.0).
         $report = $this->evaluateWithConfirmedStatus(
-            observedCount: 85,
+            observedCount: 30,
             confirmed: SignalStatus::SevereDrop,
             samples: $this->baselineSamples()
         );
@@ -79,9 +80,9 @@ class DispersionEvaluatorTest extends TestCase
 
     public function testValueSeveralMadsAboveMedianReportsMildSpike(): void
     {
-        // modified_z = 0.6745 * (106 - 100.5) / 1.0 = 3.71 (magnitude in [3.5, 7.0)).
+        // modified_z = 0.6745 * (136 - 100.5) / 6.762 = 3.54 (magnitude in [3.5, 7.0)).
         $report = $this->evaluateWithConfirmedStatus(
-            observedCount: 106,
+            observedCount: 136,
             confirmed: SignalStatus::MildSpike,
             samples: $this->baselineSamples()
         );
@@ -91,9 +92,9 @@ class DispersionEvaluatorTest extends TestCase
 
     public function testValueManyMadsAboveMedianReportsSevereSpike(): void
     {
-        // modified_z = 0.6745 * (116 - 100.5) / 1.0 = 10.45 (magnitude >= 7.0).
+        // modified_z = 0.6745 * (171 - 100.5) / 6.762 = 7.03 (magnitude >= 7.0).
         $report = $this->evaluateWithConfirmedStatus(
-            observedCount: 116,
+            observedCount: 171,
             confirmed: SignalStatus::SevereSpike,
             samples: $this->baselineSamples()
         );
@@ -119,6 +120,35 @@ class DispersionEvaluatorTest extends TestCase
     }
 
     /**
+     * Event counts are never less dispersed than Poisson noise, so a 4-sample
+     * history that happens to be nearly constant must not make a 20% dip at
+     * 100 events an hour look like a fault. Without the Poisson floor the
+     * MAD of 0 floors to 0.5 and 80 scores z = -27 (SevereDrop).
+     */
+    public function testPoissonFloorKeepsOrdinaryFluctuationOnAHighVolumeBucketNormal(): void
+    {
+        // Poisson MAD = 0.6745 * sqrt(100) = 6.745; z = 0.6745 * (80 - 100) / 6.745 = -2.0.
+        $report = $this->evaluateWithConfirmedStatus(
+            observedCount: 80,
+            confirmed: SignalStatus::Normal,
+            samples: $this->constantSamples(100)
+        );
+
+        self::assertSame(SignalStatus::Normal, $report->status);
+    }
+
+    public function testPoissonFloorStillFlagsALargeDropOnAHighVolumeBucket(): void
+    {
+        // z = 0.6745 * (20 - 100) / 6.745 = -8.0 (magnitude >= 7.0).
+        $report = $this->evaluateWithConfirmedStatus(
+            observedCount: 20,
+            confirmed: SignalStatus::SevereDrop,
+            samples: $this->constantSamples(100)
+        );
+
+        self::assertSame(SignalStatus::SevereDrop, $report->status);
+    }
+    /**
      * A bucket with zero historical variance (e.g. always exactly 10 orders
      * in this hour) must not divide by a zero MAD. An earlier version of
      * this class treated a bare MAD of 0 as "zero tolerance for any
@@ -133,9 +163,9 @@ class DispersionEvaluatorTest extends TestCase
     public function testMadOfZeroMatchingTheConstantValueReportsNormal(): void
     {
         $report = $this->evaluateWithConfirmedStatus(
-            observedCount: 10,
+            observedCount: 8,
             confirmed: SignalStatus::Normal,
-            samples: $this->constantSamples(10)
+            samples: $this->constantSamples(8)
         );
 
         self::assertSame(SignalStatus::Normal, $report->status);
@@ -143,11 +173,11 @@ class DispersionEvaluatorTest extends TestCase
 
     public function testMadOfZeroSmallDeviationAboveReportsMildSpikeNotSevere(): void
     {
-        // z = 0.6745 * (13 - 10) / MAD_CONTINUITY_FLOOR(0.5) = 4.047 (magnitude in [3.5, 7.0)).
+        // z = 0.6745 * (11 - 8) / MAD_CONTINUITY_FLOOR(0.5) = 4.047 (magnitude in [3.5, 7.0)).
         $report = $this->evaluateWithConfirmedStatus(
-            observedCount: 13,
+            observedCount: 11,
             confirmed: SignalStatus::MildSpike,
-            samples: $this->constantSamples(10)
+            samples: $this->constantSamples(8)
         );
 
         self::assertSame(SignalStatus::MildSpike, $report->status);
@@ -155,11 +185,11 @@ class DispersionEvaluatorTest extends TestCase
 
     public function testMadOfZeroSmallDeviationBelowReportsMildDropNotSevere(): void
     {
-        // z = 0.6745 * (7 - 10) / 0.5 = -4.047 (magnitude in [3.5, 7.0)).
+        // z = 0.6745 * (5 - 8) / 0.5 = -4.047 (magnitude in [3.5, 7.0)).
         $report = $this->evaluateWithConfirmedStatus(
-            observedCount: 7,
+            observedCount: 5,
             confirmed: SignalStatus::MildDrop,
-            samples: $this->constantSamples(10)
+            samples: $this->constantSamples(8)
         );
 
         self::assertSame(SignalStatus::MildDrop, $report->status);
@@ -167,12 +197,12 @@ class DispersionEvaluatorTest extends TestCase
 
     public function testMadOfZeroLargeDeviationStillReportsSevere(): void
     {
-        // z = 0.6745 * (20 - 10) / 0.5 = 13.49 -- the floor damps small
+        // z = 0.6745 * (18 - 8) / 0.5 = 13.49 -- the floor damps small
         // deviations without neutering real anomaly detection.
         $report = $this->evaluateWithConfirmedStatus(
-            observedCount: 20,
+            observedCount: 18,
             confirmed: SignalStatus::SevereSpike,
-            samples: $this->constantSamples(10)
+            samples: $this->constantSamples(8)
         );
 
         self::assertSame(SignalStatus::SevereSpike, $report->status);
@@ -309,7 +339,7 @@ class DispersionEvaluatorTest extends TestCase
         $stateRepository->method('get')->willReturn($state);
         $stateRepository->expects(self::once())->method('save')->with(self::captureInto($savedState));
 
-        // observedCount=85 against the baseline dataset classifies as SevereDrop, differing from confirmed Normal.
+        // observedCount=30 against the baseline dataset classifies as SevereDrop, differing from confirmed Normal.
         $rollupRepository = $this->createStub(RollupRepository::class);
         $rollupRepository->method('hourlyCountsForBucket')->willReturn($this->baselineSamples());
 
@@ -317,7 +347,7 @@ class DispersionEvaluatorTest extends TestCase
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
             self::CATEGORY,
-            85,
+            30,
             $this->now(),
             $this->now()
         );
@@ -334,7 +364,7 @@ class DispersionEvaluatorTest extends TestCase
     public function testSecondConsecutiveTickOfADifferingStatusConfirmsUsingTheCurrentRawStatus(): void
     {
         // Pending was set to MildDrop by a prior tick, but THIS tick's raw
-        // (observedCount=85 -> SevereDrop) differs from it; must still
+        // (observedCount=30 -> SevereDrop) differs from it; must still
         // confirm on the current raw value, not require it to match pending
         // exactly (the same real bug CronHealth\Evaluator's debounce fixed).
         $state = $this->stateWith(confirmed: SignalStatus::Normal, pending: SignalStatus::MildDrop, sequence: 6);
@@ -351,7 +381,7 @@ class DispersionEvaluatorTest extends TestCase
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
             self::CATEGORY,
-            85,
+            30,
             $this->now(),
             $this->now()
         );
@@ -432,7 +462,7 @@ class DispersionEvaluatorTest extends TestCase
             self::STORE_VIEW_ID,
             self::STORE_VIEW_CODE,
             self::CATEGORY,
-            85,
+            30,
             $this->now(),
             $this->now()
         );
@@ -535,7 +565,7 @@ class DispersionEvaluatorTest extends TestCase
         // Sufficiency must still be checked -- the query cannot be skipped
         // just because observedCount is nonzero, or condition 1 would be
         // unreachable again.
-        $rollupRepository->expects(self::once())->method('allHourlyCountsInWindow')->willReturn([]);
+        $rollupRepository->expects(self::atLeastOnce())->method('allHourlyCountsInWindow')->willReturn([]);
 
         $report = (new DispersionEvaluator($rollupRepository, $stateRepository))->evaluate(
             self::STORE_VIEW_ID,
@@ -573,7 +603,7 @@ class DispersionEvaluatorTest extends TestCase
             $this->sample(weeksAgo: 2, count: 3),
             $this->sample(weeksAgo: 1, count: 3),
         ]);
-        $rollupRepository->expects(self::once())->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
+        $rollupRepository->expects(self::atLeastOnce())->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
             currentGapHours: 9,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
             anchorCount: 100,
@@ -622,7 +652,7 @@ class DispersionEvaluatorTest extends TestCase
         // (same fixture as the SevereDrop test above) -- proving Normal
         // here comes from the spike-floor short-circuit, not from an
         // empty/insufficient distribution masking the real comparison.
-        $rollupRepository->expects(self::once())->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
+        $rollupRepository->expects(self::atLeastOnce())->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
             currentGapHours: 9,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 10],
             anchorCount: 100,
@@ -669,7 +699,7 @@ class DispersionEvaluatorTest extends TestCase
         ]);
         // Bucket rows carry 0/1 historically (max=1); 20 is both >=
         // LOW_VOLUME_SPIKE_MIN_COUNT (5) and >= 1 * LOW_VOLUME_SEVERE_SPIKE_MULTIPLIER (4).
-        $rollupRepository->expects(self::once())->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
+        $rollupRepository->expects(self::atLeastOnce())->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
             currentGapHours: 1,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 1],
             anchorCount: 100,
@@ -709,7 +739,7 @@ class DispersionEvaluatorTest extends TestCase
         ]);
         // Bucket rows carry a historical max of 2; observedCount=6 clears the
         // absolute floor (5) but not 2 * 4 = 8, so this must stay Normal.
-        $rollupRepository->expects(self::once())->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
+        $rollupRepository->expects(self::atLeastOnce())->method('allHourlyCountsInWindow')->willReturn($this->lowVolumeSeries(
             currentGapHours: 1,
             bucketGapHoursByWeeksAgo: [4 => 1, 3 => 1, 2 => 1, 1 => 1],
             anchorCount: 100,

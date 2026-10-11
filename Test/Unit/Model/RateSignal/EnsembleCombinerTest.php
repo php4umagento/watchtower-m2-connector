@@ -67,11 +67,11 @@ class EnsembleCombinerTest extends TestCase
 
     public function testTwoActiveChecksThatDisagreeWithNoThirdVoteDefersToCheckA(): void
     {
-        // Check A votes Normal; Check B votes SevereDrop; Check C abstains.
+        // Check A votes Normal; Check B votes MildDrop; Check C abstains.
         // A 1-1 split with only 2 active checks has no majority -> defers
         // to Check A, never to B alone -- and attribution reflects that:
         // only dispersion, not seasonal, drove the verdict.
-        [$status, $drivingChecks] = $this->ensembleResult(seasonalVote: SignalStatus::SevereDrop, trendVote: null);
+        [$status, $drivingChecks] = $this->ensembleResult(seasonalVote: SignalStatus::MildDrop, trendVote: null);
 
         self::assertSame(SignalStatus::Normal, $status);
         self::assertSame(['dispersion'], $drivingChecks);
@@ -80,26 +80,39 @@ class EnsembleCombinerTest extends TestCase
     public function testThreeActiveChecksWithATwoOfThreeMajorityOverridesCheckAsOwnRawVerdict(): void
     {
         // Check A votes Normal; Check B and Check C both independently
-        // vote SevereDrop. 2 of 3 is a strict majority, so the ensemble's
-        // FINAL verdict is SevereDrop, genuinely overriding Check A's own
+        // vote MildDrop. 2 of 3 is a strict majority, so the ensemble's
+        // FINAL verdict is MildDrop, genuinely overriding Check A's own
         // raw classification -- attribution names the two that actually
         // agreed on it, not dispersion, which voted the other way.
         [$status, $drivingChecks] = $this->ensembleResult(
-            seasonalVote: SignalStatus::SevereDrop,
-            trendVote: SignalStatus::SevereDrop
+            seasonalVote: SignalStatus::MildDrop,
+            trendVote: SignalStatus::MildDrop
         );
 
-        self::assertSame(SignalStatus::SevereDrop, $status);
+        self::assertSame(SignalStatus::MildDrop, $status);
         self::assertSame(['seasonal', 'trend'], $drivingChecks);
     }
 
+    public function testASeasonalIndexFarFromOneDecidesAloneEvenAgainstAMajority(): void
+    {
+        // Checks A and C cannot see the calendar, so in a clearly seasonal period
+        // (expected 175 against a median of 100.5, a 74% deviation) they would
+        // outvote B with the very baseline B exists to correct. B decides alone.
+        [$status, $drivingChecks] = $this->ensembleResult(
+            seasonalVote: SignalStatus::SevereDrop,
+            trendVote: SignalStatus::Normal
+        );
+
+        self::assertSame(SignalStatus::SevereDrop, $status);
+        self::assertSame(['seasonal'], $drivingChecks);
+    }
     public function testThreeActiveChecksAllDisagreeingHasNoMajorityAndDefersToCheckA(): void
     {
-        // Check A votes Normal; Check B votes SevereDrop; Check C votes
+        // Check A votes Normal; Check B votes MildDrop; Check C votes
         // MildSpike. Three genuinely distinct votes, no pair agrees -> no
         // majority -> defers to Check A, and attribution reflects only that.
         [$status, $drivingChecks] = $this->ensembleResult(
-            seasonalVote: SignalStatus::SevereDrop,
+            seasonalVote: SignalStatus::MildDrop,
             trendVote: SignalStatus::MildSpike
         );
 
@@ -265,7 +278,7 @@ class EnsembleCombinerTest extends TestCase
 
     /**
      * Picks an adjusted expected value that classifies to exactly $vote
-     * against Check A's own fixed MAD of 1.0 and OBSERVED_COUNT of 100 --
+     * against Check A's own fixed (Poisson-floored, 6.76) MAD and OBSERVED_COUNT of 100 --
      * or null (abstain) when $vote itself is null.
      */
     private function expectedValueVotingFor(?SignalStatus $vote): ?float
@@ -273,10 +286,10 @@ class EnsembleCombinerTest extends TestCase
         return match ($vote) {
             null => null,
             SignalStatus::Normal => (float) self::OBSERVED_COUNT,
-            SignalStatus::MildDrop => self::OBSERVED_COUNT + 6.0,
-            SignalStatus::SevereDrop => self::OBSERVED_COUNT + 20.0,
-            SignalStatus::MildSpike => self::OBSERVED_COUNT - 6.0,
-            SignalStatus::SevereSpike => self::OBSERVED_COUNT - 20.0,
+            SignalStatus::MildDrop => self::OBSERVED_COUNT + 40.0,
+            SignalStatus::SevereDrop => self::OBSERVED_COUNT + 75.0,
+            SignalStatus::MildSpike => self::OBSERVED_COUNT - 40.0,
+            SignalStatus::SevereSpike => self::OBSERVED_COUNT - 75.0,
             default => throw new \InvalidArgumentException("Unsupported vote for this fixture: {$vote->value}"),
         };
     }

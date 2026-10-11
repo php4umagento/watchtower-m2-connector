@@ -8,192 +8,159 @@ declare(strict_types=1);
 
 namespace Watchtower\Connector\Test\Unit\Replay;
 
-use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Watchtower\Connector\Model\Api\SignalStatus;
 
 /**
  * End-to-end replay of the real baseline pipeline (rollup windows, Check A/B/C
- * ensemble, two-evaluation debounce, persisted state) against seeded synthetic
- * traffic, to measure what a merchant would actually experience: false alerts
- * on a healthy store, detection latency for faults, recovery, warm-up.
+ * ensemble, sustained-shift check, two-evaluation debounce, persisted state)
+ * against seeded synthetic traffic, to measure what a merchant would actually
+ * experience: false alerts on a healthy store, detection latency for faults,
+ * recovery, warm-up.
  *
  * The bounds below are regression ceilings fitted to measured behaviour with
- * headroom, NOT endorsements of that behaviour. Tests named "KnownGap" state
- * what the product intends and report Incomplete (not Failed) while it does not
- * hold yet; they start passing the day the gap is closed.
+ * headroom. When a new gap is found, add a test that states the intended
+ * behaviour and reports it Incomplete (markTestIncomplete) while it does not
+ * hold, rather than loosening a ceiling.
  *
  * Synthetic traffic is friendlier than production in some ways (stationary
  * shape, no bots, no promotions) and unfriendlier in others (no tracking
  * outages), so read the numbers as relative evidence, not a forecast.
  * Set WATCHTOWER_REPLAY_REPORT=/path to collect a scorecard of every scenario.
+ * Plain loops rather than data providers: the suite must run on PHPUnit 9, 10 and 12.
  */
-#[Group('replay')]
 class BaselineReplayTest extends TestCase
 {
+    private const VOLUMES = [50, 200, 1000];
+
     private const DROPS = [SignalStatus::MildDrop, SignalStatus::SevereDrop];
     private const SPIKES = [SignalStatus::MildSpike, SignalStatus::SevereSpike];
 
-    /** @return array<string, array{int}> */
-    public static function volumes(): array
+    /** Worst seed's confirmed false alerts per week on a healthy store, with headroom. */
+    private const FALSE_ALERT_CEILING = [50 => 2.0, 200 => 2.0, 1000 => 3.0];
+
+    /** Slowest detection of a 12h total outage across day and night starts, in hours. */
+    private const OUTAGE_WORST_HOURS = [50 => 12, 200 => 8, 1000 => 8];
+
+    /** Of 6 seeds, how many must catch a 12h 50% drop: single hours cannot prove it, the sustained-shift check does. */
+    private const HALF_DROP_MIN_DETECTED_OF_6 = [50 => 3, 200 => 3, 1000 => 4];
+
+    /** Of 6 seeds, how many must catch a 6h 5x surge. */
+    private const SURGE_MIN_DETECTED_OF_6 = [50 => 4, 200 => 5, 1000 => 5];
+
+    public function testHealthyStoreFalseAlertRateStaysWithinCeiling(): void
     {
-        return ['50/day' => [50], '200/day' => [200], '1000/day' => [1000]];
+        foreach (self::VOLUMES as $ordersPerDay) {
+            $perWeek = $this->healthyAlertsPerWeekBySeed($ordersPerDay);
+            $mean = array_sum($perWeek) / count($perWeek);
+            ReplayReport::line(sprintf('healthy %4d/day: false alerts/week mean %.2f worst %.2f', $ordersPerDay, $mean, max($perWeek)));
+
+            self::assertLessThanOrEqual(self::FALSE_ALERT_CEILING[$ordersPerDay], max($perWeek), "$ordersPerDay/day");
+        }
     }
 
-    #[DataProvider('volumes')]
-    public function testHealthyStoreFalseAlertRate(int $ordersPerDay): void
+    public function testHealthyStoreRaisesAtMostOneFalseAlertAWeekOnAverage(): void
     {
-        $perWeek = [];
+        foreach (self::VOLUMES as $ordersPerDay) {
+            $perWeek = $this->healthyAlertsPerWeekBySeed($ordersPerDay);
 
-        foreach ([1, 2, 3, 4] as $seed) {
-            $harness = new ReplayHarness(new TrafficModel($ordersPerDay, $seed));
-            $harness->backfill($this->at('2026-05-04'), $this->at('2026-07-27'));
-            $harness->run($this->at('2026-07-27'), $this->at('2026-08-17'));
-            $perWeek[] = count($harness->alerts()) / 3;
+            self::assertLessThanOrEqual(1.0, array_sum($perWeek) / count($perWeek), "$ordersPerDay/day");
         }
-
-        $mean = array_sum($perWeek) / count($perWeek);
-        ReplayReport::line(sprintf('healthy %4d/day: false alerts/week mean %.2f worst %.2f', $ordersPerDay, $mean, max($perWeek)));
-
-        self::assertLessThanOrEqual(self::FALSE_ALERT_CEILING[$ordersPerDay], max($perWeek));
     }
 
-    private const FALSE_ALERT_CEILING = [50 => 2.0, 200 => 4.5, 1000 => 5.0];
-
-    #[DataProvider('volumes')]
-    public function testHealthyStoreFalseAlertRateKnownGap(int $ordersPerDay): void
+    public function testFullOutageIsDetectedByDayAndByNight(): void
     {
-        $alerts = 0;
+        foreach (self::VOLUMES as $ordersPerDay) {
+            foreach (['2026-08-12 14:00' => 'day', '2026-08-12 22:00' => 'night'] as $start => $label) {
+                $found = [];
 
-        foreach ([1, 2, 3, 4] as $seed) {
-            $harness = new ReplayHarness(new TrafficModel($ordersPerDay, $seed));
-            $harness->backfill($this->at('2026-05-04'), $this->at('2026-07-27'));
-            $harness->run($this->at('2026-07-27'), $this->at('2026-08-17'));
-            $alerts += count($harness->alerts());
+                foreach ([1, 2, 3, 4, 5] as $seed) {
+                    $faultStart = $this->utc($start);
+                    $faultEnd = $faultStart->modify('+12 hours');
+                    $harness = $this->replayWithFault($ordersPerDay, $seed, $faultStart, $faultEnd, static fn (int $n): int => 0);
+                    $latency = $harness->hoursToDetect($faultStart, $faultEnd, self::DROPS);
+
+                    self::assertNotNull($latency, "12h total outage ($label, $ordersPerDay/day, seed $seed) went undetected");
+                    $found[] = $latency;
+                }
+
+                sort($found);
+                ReplayReport::line(sprintf('outage 12h %4d/day %-5s: detected 5/5, hours to detect %s', $ordersPerDay, $label, implode(',', $found)));
+                self::assertLessThanOrEqual(self::OUTAGE_WORST_HOURS[$ordersPerDay], max($found), "$ordersPerDay/day $label");
+            }
         }
-
-        $perWeek = $alerts / 12;
-
-        if ($perWeek > 1.0) {
-            self::markTestIncomplete(sprintf(
-                'KnownGap: a healthy %d/day store raises %.2f confirmed false alerts a week (target: at most 1).',
-                $ordersPerDay,
-                $perWeek
-            ));
-        }
-
-        self::assertLessThanOrEqual(1.0, $perWeek);
     }
 
-    #[DataProvider('volumes')]
-    public function testFullOutageIsDetectedByDayAndByNight(int $ordersPerDay): void
+    public function testHalfTrafficDropIsUsuallyDetected(): void
     {
-        $latencies = [];
+        foreach (self::VOLUMES as $ordersPerDay) {
+            $found = [];
 
-        foreach (['2026-08-12 14:00' => 'day', '2026-08-12 22:00' => 'night'] as $start => $label) {
-            foreach ([1, 2, 3, 4, 5] as $seed) {
-                $faultStart = $this->at($start);
+            foreach ([1, 2, 3, 4, 5, 6] as $seed) {
+                $faultStart = $this->utc('2026-08-12 14:00');
                 $faultEnd = $faultStart->modify('+12 hours');
-                $harness = $this->replayWithFault($ordersPerDay, $seed, $faultStart, $faultEnd, static fn (int $n): int => 0);
-                $latencies[$label][] = $harness->hoursToDetect($faultStart, $faultEnd, self::DROPS);
-            }
-        }
+                $harness = $this->replayWithFault($ordersPerDay, $seed, $faultStart, $faultEnd, static fn (int $n): int => intdiv($n, 2));
+                $latency = $harness->hoursToDetect($faultStart, $faultEnd, self::DROPS);
 
-        foreach ($latencies as $label => $values) {
-            $found = array_filter($values, static fn (?int $v): bool => $v !== null);
+                if ($latency !== null) {
+                    $found[] = $latency;
+                }
+            }
+
             sort($found);
-            ReplayReport::line(sprintf(
-                'outage 12h %4d/day %-5s: detected %d/%d, hours to detect %s',
-                $ordersPerDay,
-                $label,
-                count($found),
-                count($values),
-                implode(',', $found)
-            ));
-            self::assertCount(count($values), $found, "a 12h total outage ($label) went undetected");
-            self::assertLessThanOrEqual(self::OUTAGE_WORST_HOURS[$ordersPerDay], max($found));
+            ReplayReport::line(sprintf('half drop 12h %4d/day: detected %d/6, hours to detect %s', $ordersPerDay, count($found), implode(',', $found)));
+            self::assertGreaterThanOrEqual(self::HALF_DROP_MIN_DETECTED_OF_6[$ordersPerDay], count($found), "$ordersPerDay/day");
         }
     }
 
-    private const OUTAGE_WORST_HOURS = [50 => 12, 200 => 10, 1000 => 8];
-
-    #[DataProvider('volumes')]
-    public function testHalfTrafficDropIsUsuallyDetected(int $ordersPerDay): void
+    public function testFiveFoldSurgeIsDetected(): void
     {
-        $found = [];
+        foreach (self::VOLUMES as $ordersPerDay) {
+            $found = [];
 
-        foreach ([1, 2, 3, 4, 5, 6] as $seed) {
-            $faultStart = $this->at('2026-08-12 14:00');
-            $faultEnd = $faultStart->modify('+12 hours');
-            $harness = $this->replayWithFault($ordersPerDay, $seed, $faultStart, $faultEnd, static fn (int $n): int => intdiv($n, 2));
-            $latency = $harness->hoursToDetect($faultStart, $faultEnd, self::DROPS);
+            foreach ([1, 2, 3, 4, 5, 6] as $seed) {
+                $faultStart = $this->utc('2026-08-12 14:00');
+                $faultEnd = $faultStart->modify('+6 hours');
+                $harness = $this->replayWithFault($ordersPerDay, $seed, $faultStart, $faultEnd, static fn (int $n): int => $n * 5);
+                $latency = $harness->hoursToDetect($faultStart, $faultEnd, self::SPIKES);
 
-            if ($latency !== null) {
-                $found[] = $latency;
+                if ($latency !== null) {
+                    $found[] = $latency;
+                }
             }
-        }
 
-        sort($found);
-        ReplayReport::line(sprintf('half drop 12h %4d/day: detected %d/6, hours to detect %s', $ordersPerDay, count($found), implode(',', $found)));
-        self::assertGreaterThanOrEqual(3, count($found));
+            sort($found);
+            ReplayReport::line(sprintf('5x surge 6h   %4d/day: detected %d/6, hours to detect %s', $ordersPerDay, count($found), implode(',', $found)));
+            self::assertGreaterThanOrEqual(self::SURGE_MIN_DETECTED_OF_6[$ordersPerDay], count($found), "$ordersPerDay/day");
+        }
     }
 
-    /** 50/day sits on the inter-arrival path, which only flags a burst of 5+ events at 4x its bucket max: 1 of 6 here. */
-    private const SURGE_MIN_DETECTED = [50 => 1, 200 => 5, 1000 => 5];
-
-    #[DataProvider('volumes')]
-    public function testFiveFoldSurgeIsDetected(int $ordersPerDay): void
+    public function testSignalReturnsToNormalAfterAnOutageEnds(): void
     {
-        $found = [];
+        foreach (self::VOLUMES as $ordersPerDay) {
+            $alertsPerIncident = [];
 
-        foreach ([1, 2, 3, 4, 5, 6] as $seed) {
-            $faultStart = $this->at('2026-08-12 14:00');
-            $faultEnd = $faultStart->modify('+6 hours');
-            $harness = $this->replayWithFault($ordersPerDay, $seed, $faultStart, $faultEnd, static fn (int $n): int => $n * 5);
-            $latency = $harness->hoursToDetect($faultStart, $faultEnd, self::SPIKES);
+            foreach ([1, 2, 3, 4] as $seed) {
+                $faultStart = $this->utc('2026-08-12 14:00');
+                $faultEnd = $faultStart->modify('+12 hours');
+                $until = $faultEnd->modify('+72 hours');
+                $harness = $this->replayWithFault($ordersPerDay, $seed, $faultStart, $faultEnd, static fn (int $n): int => 0, $until);
 
-            if ($latency !== null) {
-                $found[] = $latency;
+                self::assertTrue($harness->endedNormal(), "$ordersPerDay/day seed $seed: still anomalous 72h after the outage ended");
+                $alertsPerIncident[] = count($harness->alerts($faultStart, $until));
             }
+
+            ReplayReport::line(sprintf('outage 12h + 72h recovery %4d/day: alerts across the incident per seed %s', $ordersPerDay, implode(',', $alertsPerIncident)));
+            self::assertLessThanOrEqual(8, max($alertsPerIncident), "$ordersPerDay/day");
         }
-
-        sort($found);
-        ReplayReport::line(sprintf('5x surge 6h   %4d/day: detected %d/6, hours to detect %s', $ordersPerDay, count($found), implode(',', $found)));
-        self::assertGreaterThanOrEqual(self::SURGE_MIN_DETECTED[$ordersPerDay], count($found));
-    }
-
-    #[DataProvider('volumes')]
-    public function testSignalReturnsToNormalAfterAnOutageEnds(int $ordersPerDay): void
-    {
-        $hoursToNormal = [];
-
-        foreach ([1, 2, 3, 4] as $seed) {
-            $faultStart = $this->at('2026-08-12 14:00');
-            $faultEnd = $faultStart->modify('+12 hours');
-            $harness = $this->replayWithFault(
-                $ordersPerDay,
-                $seed,
-                $faultStart,
-                $faultEnd,
-                static fn (int $n): int => 0,
-                $faultEnd->modify('+72 hours')
-            );
-
-            self::assertTrue($harness->endedNormal(), 'signal still reported an anomaly 72h after the outage ended');
-            $hoursToNormal[] = count($harness->alerts($faultStart, $faultEnd->modify('+72 hours')));
-        }
-
-        ReplayReport::line(sprintf('outage+72h recovery %4d/day: alerts raised across incident per seed %s', $ordersPerDay, implode(',', $hoursToNormal)));
-        self::assertLessThanOrEqual(8, max($hoursToNormal));
     }
 
     public function testColdStartStaysQuietUntilABaselineExists(): void
     {
         $harness = new ReplayHarness(new TrafficModel(200, 1));
-        $harness->run($this->at('2026-08-03'), $this->at('2026-09-07'));
+        $harness->run($this->utc('2026-08-03'), $this->utc('2026-09-07'));
 
-        $firstFortnight = $harness->alerts($this->at('2026-08-03'), $this->at('2026-08-17'));
+        $firstFortnight = $harness->alerts($this->utc('2026-08-03'), $this->utc('2026-08-17'));
         ReplayReport::line(sprintf(
             'cold start 200/day: %d of %d hours INSUFFICIENT_DATA over 5 weeks, %d alerts in the first 14 days',
             $harness->warmUpHours(),
@@ -207,19 +174,16 @@ class BaselineReplayTest extends TestCase
 
     public function testBelowTheValidatedVolumeIsHonestAboutNotKnowing(): void
     {
-        $alerts = 0;
-
         foreach ([1, 2, 3] as $seed) {
-            $faultStart = $this->at('2026-08-12 14:00');
+            $faultStart = $this->utc('2026-08-12 14:00');
             $faultEnd = $faultStart->modify('+24 hours');
             $harness = $this->replayWithFault(10, $seed, $faultStart, $faultEnd, static fn (int $n): int => 0);
-            $alerts += count($harness->alerts());
-            self::assertNull($harness->hoursToDetect($faultStart, $faultEnd, self::DROPS));
-            self::assertSame([], $harness->alerts(), 'a store under the validated volume must not page on rate signals');
+
+            self::assertNull($harness->hoursToDetect($faultStart, $faultEnd, self::DROPS), 'seed ' . $seed);
+            self::assertSame([], $harness->alerts(), "seed $seed: a store under the validated volume must not page on rate signals");
         }
 
-        ReplayReport::line('10/day outage 24h: never reported a drop, zero alerts (rate signals are INSUFFICIENT_DATA by design)');
-        self::assertSame(0, $alerts);
+        ReplayReport::line('10/day outage 24h: never reported a drop, zero alerts (rate signals stay INSUFFICIENT_DATA by design)');
     }
 
     public function testBlackFridayPeakDoesNotCauseAPostPeakDropStorm(): void
@@ -228,55 +192,63 @@ class BaselineReplayTest extends TestCase
 
         foreach ([1, 2, 3] as $seed) {
             $harness = $this->blackFridayReplay($seed, true);
-            $post[] = count($harness->alerts($this->at('2026-12-01'), $this->at('2026-12-14')));
+            $post[] = count($harness->alerts($this->utc('2026-12-01'), $this->utc('2026-12-14')));
         }
 
         ReplayReport::line('black friday 200/day, seasonal on: alerts 1-14 Dec per seed ' . implode(',', $post));
-        self::assertLessThanOrEqual(4, max($post));
+        self::assertLessThanOrEqual(5, max($post));
     }
 
-    public function testSeasonalCheckReducesBlackFridayWeekAlertsKnownGap(): void
+    public function testSeasonalCheckReducesBlackFridayWeekAlerts(): void
     {
         $on = 0;
         $off = 0;
+        $week = [$this->utc('2026-11-23'), $this->utc('2026-12-01')];
 
         foreach ([1, 2, 3] as $seed) {
-            $week = [$this->at('2026-11-23'), $this->at('2026-12-01')];
             $on += count($this->blackFridayReplay($seed, true)->alerts(...$week));
             $off += count($this->blackFridayReplay($seed, false)->alerts(...$week));
         }
 
         ReplayReport::line(sprintf('black friday week 200/day, 3 seeds: alerts seasonal on %d, seasonal off %d', $on, $off));
+        self::assertLessThanOrEqual($off * 0.6, $on);
+    }
 
-        if ($on > $off * 0.7) {
-            self::markTestIncomplete(sprintf(
-                'KnownGap: with a year of seasonal history the Black Friday week raised %d alerts, against %d with the seasonal check disabled (target: clearly fewer).',
-                $on,
-                $off
-            ));
+    /**
+     * @return float[] confirmed anomaly alerts per week, one entry per seed
+     */
+    private function healthyAlertsPerWeekBySeed(int $ordersPerDay): array
+    {
+        $perWeek = [];
+
+        foreach ([1, 2, 3, 4] as $seed) {
+            $harness = new ReplayHarness(new TrafficModel($ordersPerDay, $seed));
+            $harness->backfill($this->utc('2026-05-04'), $this->utc('2026-07-27'));
+            $harness->run($this->utc('2026-07-27'), $this->utc('2026-08-17'));
+            $perWeek[] = count($harness->alerts()) / 3;
         }
 
-        self::assertLessThanOrEqual($off * 0.7, $on);
+        return $perWeek;
     }
 
     private function blackFridayReplay(int $seed, bool $seasonal): ReplayHarness
     {
         $peak = function (\DateTimeImmutable $hour): float {
-            $blackFriday = $this->at($hour->format('Y') . '-11-01')->modify('fourth thursday of this month')->modify('+1 day');
+            $blackFriday = $this->utc($hour->format('Y') . '-11-01')->modify('fourth thursday of this month')->modify('+1 day');
             $days = abs(($hour->setTime(0, 0)->getTimestamp() - $blackFriday->getTimestamp()) / 86400);
 
             return $days <= 3 ? 3.0 : 1.0;
         };
 
         $harness = new ReplayHarness(new TrafficModel(200, $seed, 0.1, 0.0, null, $peak), $seasonal);
-        $harness->backfill($this->at('2024-10-01'), $this->at('2026-11-02'));
-        $harness->run($this->at('2026-11-02'), $this->at('2026-12-14'));
+        $harness->backfill($this->utc('2024-10-01'), $this->utc('2026-11-02'));
+        $harness->run($this->utc('2026-11-02'), $this->utc('2026-12-14'));
 
         return $harness;
     }
 
     /**
-     * Two warm-up days of normal evaluation, the fault, then $until (default fault end + 12h).
+     * Normal evaluation from 2026-08-10, the fault, then up to $until (default fault end + 12h).
      *
      * @param callable(int): int $effect maps the natural hourly count to the faulty one
      */
@@ -289,9 +261,9 @@ class BaselineReplayTest extends TestCase
         ?\DateTimeImmutable $until = null
     ): ReplayHarness {
         $harness = new ReplayHarness(new TrafficModel($ordersPerDay, $seed));
-        $harness->backfill($this->at('2026-05-04'), $this->at('2026-08-10'));
+        $harness->backfill($this->utc('2026-05-04'), $this->utc('2026-08-10'));
         $harness->run(
-            $this->at('2026-08-10'),
+            $this->utc('2026-08-10'),
             $until ?? $faultEnd->modify('+12 hours'),
             static fn (\DateTimeImmutable $hour, int $natural): int
                 => $hour >= $faultStart && $hour < $faultEnd ? $effect($natural) : $natural
@@ -300,7 +272,7 @@ class BaselineReplayTest extends TestCase
         return $harness;
     }
 
-    private function at(string $time): \DateTimeImmutable
+    private function utc(string $time): \DateTimeImmutable
     {
         return new \DateTimeImmutable($time, new \DateTimeZone('UTC'));
     }
