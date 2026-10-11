@@ -5,6 +5,10 @@ All notable changes to this module are documented here. Versioning follows
 repository (`composer.json` deliberately carries no hardcoded `version`
 field — Composer's VCS-repository support resolves it from the tag).
 
+## [1.34.0] - 2026-10-11
+
+The **Watchtower > Diagnostics** page is rewritten in plain language: one headline saying whether things are fine, then what is checked and what each status means, without the engineering detail (`watchtower:status` keeps that). Magento installs running compiled dependency injection need `setup:di:compile` after updating.
+
 ## [1.33.0] - 2026-10-11
 
 Fewer false alerts and faster detection for `checkout`, `basket_quote` and `customer_account`: ordinary hour-to-hour fluctuation on busy stores no longer alerts, a sustained drop or surge (such as half the usual traffic for several hours) is caught, and a known seasonal peak like Black Friday no longer reads as a spike. No wire change and no `setup:upgrade` needed.
