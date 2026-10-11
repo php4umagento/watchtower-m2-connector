@@ -37,6 +37,8 @@ use Watchtower\Connector\Model\StoreView\LiveStoreViewResolver;
  */
 class DiagnosticsSnapshotProvider
 {
+    public const NOT_CONFIGURED_ERROR = 'Watchtower is not configured.';
+
     private const CATEGORIES = [
         HistorySeeder::CATEGORY_BASKET_QUOTE,
         HistorySeeder::CATEGORY_CHECKOUT,
@@ -97,7 +99,7 @@ class DiagnosticsSnapshotProvider
         if (!$this->config->isConfigured()) {
             return new DiagnosticsSnapshot(
                 reachable: false,
-                unreachableError: 'Watchtower is not configured.',
+                unreachableError: self::NOT_CONFIGURED_ERROR,
                 keyValid: null,
                 organizationPaused: null,
                 lastSuccessfulSubmissionAt: null,
